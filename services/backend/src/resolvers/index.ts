@@ -105,6 +105,7 @@ import type {
   GameFileBatchUploadPayloadGql,
   CompleteGameFileBatchUploadInputGql,
   InstallModPlansBatchInputGql,
+  HikatWhitelistCandidateGql,
 } from "@hikat/graphql"
 
 import {
@@ -197,6 +198,7 @@ import {
   setServerWhitelistEnabled,
   addServerWhitelistPlayer,
   removeServerWhitelistPlayer,
+  getHikatWhitelistCandidates,
 } from "../services/pterodactyl/serverWhitelistService"
 import { getAdminDashboard } from "../services/dashboardService"
 
@@ -660,6 +662,18 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return getServerWhitelist(context.db, context.env, args?.serverId)
+    },
+
+    hikatWhitelistCandidates: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<HikatWhitelistCandidateGql[]> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getHikatWhitelistCandidates(context.db)
     },
 
 

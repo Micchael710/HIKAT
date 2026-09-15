@@ -14,11 +14,13 @@ import type {
   ServerWhitelistMode,
   ServerWhitelistEntry,
   ServerWhitelist,
+  HikatWhitelistCandidate,
 } from "@hikat/shared"
 
 export type ServerWhitelistModeGql = ServerWhitelistMode
 export type ServerWhitelistEntryGql = ServerWhitelistEntry
 export type ServerWhitelistGql = ServerWhitelist
+export type HikatWhitelistCandidateGql = HikatWhitelistCandidate
 
 export type ServerProvisioningStatusGql = ServerProvisioningStatus
 

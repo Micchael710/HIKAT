@@ -1,11 +1,11 @@
 import crypto from "node:crypto"
 import { GraphQLError } from "graphql"
-import { sql } from "drizzle-orm"
+import { sql, eq } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import type { Env } from "../../types"
 import type { IPterodactylClient } from "./types"
 import { resolvePterodactylClient, getServerStatus } from "./serverAdministrationService"
-import type { ServerWhitelistGql } from "@hikat/graphql"
+import type { ServerWhitelistGql, HikatWhitelistCandidateGql } from "@hikat/graphql"
 
 /**
  * Computes an offline-mode UUID for a player name according to standard Minecraft specification (UUID v3 MD5).
@@ -344,3 +344,60 @@ export async function removeServerWhitelistPlayer(
     entries: result.entries.filter((e) => e.name.toLowerCase() !== cleanName.toLowerCase()),
   }
 }
+
+/**
+ * Retrieves all registered HiKAT users and resolves their active skin efficiently in a single query.
+ */
+export async function getHikatWhitelistCandidates(
+  db: Database,
+): Promise<HikatWhitelistCandidateGql[]> {
+  const rows = await db
+    .select({
+      userId: schema.users.id,
+      displayName: schema.users.displayName,
+      selectionType: schema.playerSkinSelections.type,
+      customMediaId: sql<string | null>`${schema.playerSkins.mediaId}`.as("custom_media_id"),
+      globalMediaId: sql<string | null>`${schema.skins.mediaId}`.as("global_media_id"),
+      globalStatus: sql<string | null>`${schema.skins.status}`.as("global_status"),
+    })
+    .from(schema.users)
+    .leftJoin(
+      schema.playerSkinSelections,
+      eq(schema.playerSkinSelections.userId, schema.users.id),
+    )
+    .leftJoin(
+      schema.playerSkins,
+      eq(schema.playerSkins.userId, schema.users.id),
+    )
+    .leftJoin(
+      schema.skins,
+      eq(schema.skins.id, schema.playerSkinSelections.skinId),
+    )
+    .where(
+      sql`${schema.users.displayName} IS NOT NULL AND trim(${schema.users.displayName}) != ''`,
+    )
+    .orderBy(sql`lower(${schema.users.displayName}) ASC`)
+    .all()
+
+  return rows.map((row) => {
+    let mediaId: string | null = null
+
+    if (row.selectionType === "CUSTOM") {
+      mediaId = row.customMediaId || null
+    } else if (row.selectionType === "GLOBAL") {
+      if (row.globalStatus === "AVAILABLE" && row.globalMediaId) {
+        mediaId = row.globalMediaId
+      } else if (row.customMediaId) {
+        mediaId = row.customMediaId
+      }
+    } else {
+      mediaId = row.customMediaId || null
+    }
+
+    return {
+      displayName: row.displayName!,
+      skinImageUrl: mediaId ? `/media/content/${mediaId}` : null,
+    }
+  })
+}
+

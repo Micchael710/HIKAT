@@ -144,6 +144,14 @@ export const serverTypeDefs = /* GraphQL */ `
     entries: [ServerWhitelistEntry!]!
   }
 
+  """
+  HiKAT registered player candidate for whitelist selection
+  """
+  type HikatWhitelistCandidate {
+    displayName: String!
+    skinImageUrl: String
+  }
+
   enum ServerTaskTemplate {
     AUTO_STOP
     AUTO_START
@@ -608,6 +616,11 @@ export const serverTypeDefs = /* GraphQL */ `
     Retrieves server whitelist state and entries - requires ADMIN role
     """
     serverWhitelist(serverId: ID): ServerWhitelist!
+
+    """
+    Retrieves registered HiKAT player candidates for whitelist selector - requires ADMIN role
+    """
+    hikatWhitelistCandidates: [HikatWhitelistCandidate!]!
   }
 
   """

@@ -972,3 +972,9 @@ export interface ServerWhitelist {
   entries: ServerWhitelistEntry[]
 }
 
+export interface HikatWhitelistCandidate {
+  displayName: string
+  skinImageUrl: string | null
+}
+
+

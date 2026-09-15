@@ -7,6 +7,7 @@ import {
   setServerWhitelistEnabled,
   addServerWhitelistPlayer,
   removeServerWhitelistPlayer,
+  getHikatWhitelistCandidates,
 } from "./serverWhitelistService"
 
 function createMockD1() {
@@ -113,7 +114,7 @@ describe("Server Whitelist Service Tests", () => {
   })
 
   it("3. HiKAT OFFLINE reads and modifies /hikat/whitelist.json preserving entries and addedAt", async () => {
-    let fileStore: Record<string, string> = {
+    const fileStore: Record<string, string> = {
       "/hikat/whitelist.json": JSON.stringify({
         enabled: false,
         entries: [
@@ -219,7 +220,7 @@ describe("Server Whitelist Service Tests", () => {
   })
 
   it("5. Native Minecraft OFFLINE modifies server.properties and whitelist.json", async () => {
-    let fileStore: Record<string, string> = {
+    const fileStore: Record<string, string> = {
       "server.properties": "difficulty=hard\nwhite-list=false\nmotd=A Minecraft Server\n",
       "whitelist.json": "[]",
     }
@@ -283,4 +284,83 @@ describe("Server Whitelist Service Tests", () => {
       addServerWhitelistPlayer(db, env, "non_existent_player", null, mockClient),
     ).rejects.toThrow('El jugador "non_existent_player" no existe en HiKAT')
   })
+
+  it("7. getHikatWhitelistCandidates resolves users, skin URLs, and null fallbacks in a single query", async () => {
+    const nowIso = new Date().toISOString()
+    // Add media records
+    await db.insert(schema.contentMedia).values([
+      {
+        id: "media_custom_1",
+        objectKey: "skins/custom1.png",
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 1024,
+        createdBy: "usr_vbrayan",
+        createdAt: nowIso,
+      },
+      {
+        id: "media_global_1",
+        objectKey: "skins/global1.png",
+        mediaType: "IMAGE",
+        mimeType: "image/png",
+        sizeBytes: 2048,
+        createdBy: "usr_steve",
+        createdAt: nowIso,
+      },
+    ])
+
+    // User 1 has custom skin and selection = CUSTOM
+    await db.insert(schema.playerSkins).values({
+      id: "pskin_1",
+      userId: "usr_vbrayan",
+      mediaId: "media_custom_1",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+    await db.insert(schema.playerSkinSelections).values({
+      userId: "usr_vbrayan",
+      type: "CUSTOM",
+      skinId: null,
+      updatedAt: nowIso,
+    })
+
+    // User 2 (Steve) has no skin at all -> should be null
+    // Add User 3 with an active global skin
+    await db.insert(schema.users).values({
+      id: "usr_alex",
+      displayName: "Alex",
+      role: "PLAYER",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+    await db.insert(schema.skins).values({
+      id: "skin_global_1",
+      name: "Global Knight",
+      mediaId: "media_global_1",
+      status: "AVAILABLE",
+      createdBy: "usr_steve",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    })
+    await db.insert(schema.playerSkinSelections).values({
+      userId: "usr_alex",
+      type: "GLOBAL",
+      skinId: "skin_global_1",
+      updatedAt: nowIso,
+    })
+
+    const candidates = await getHikatWhitelistCandidates(db)
+
+    // Ordered alphabetically by displayName: Alex, Steve, vBrayan06
+    expect(candidates).toHaveLength(3)
+    expect(candidates[0]!.displayName).toBe("Alex")
+    expect(candidates[0]!.skinImageUrl).toBe("/media/content/media_global_1")
+
+    expect(candidates[1]!.displayName).toBe("Steve")
+    expect(candidates[1]!.skinImageUrl).toBeNull()
+
+    expect(candidates[2]!.displayName).toBe("vBrayan06")
+    expect(candidates[2]!.skinImageUrl).toBe("/media/content/media_custom_1")
+  })
 })
+

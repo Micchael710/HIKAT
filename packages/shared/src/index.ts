@@ -287,6 +287,11 @@ export interface ServerWhitelist {
   entries: ServerWhitelistEntry[]
 }
 
+export interface HikatWhitelistCandidate {
+  displayName: string
+  skinImageUrl: string | null
+}
+
 export interface ServerResourcesData {
   status: ServerStatus
   cpuPercent: number

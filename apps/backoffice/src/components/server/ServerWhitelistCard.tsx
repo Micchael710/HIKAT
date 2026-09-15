@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react"
-import type { ThemeMode, ServerWhitelist } from "../../types"
+import React, { useState, useEffect, useCallback, useRef } from "react"
+import type { ThemeMode, ServerWhitelist, HikatWhitelistCandidate } from "../../types"
 import { serverWhitelistApi } from "../../services/graphqlClient"
 import { getThemeTokens } from "../../theme/tokens"
 import { IconShieldCheck, IconTrash, IconSpinner, IconRefresh } from "../../theme/icons"
@@ -10,6 +10,74 @@ interface ServerWhitelistCardProps {
   onToast?: (msg: string, type?: "success" | "error") => void
 }
 
+function PlayerAvatar({
+  displayName,
+  skinImageUrl,
+  size = 24,
+}: {
+  displayName: string
+  skinImageUrl?: string | null
+  size?: number
+}) {
+  const [imgError, setImgError] = useState(false)
+
+  if (skinImageUrl && !imgError) {
+    // Standard Minecraft skin: 64x64 texture.
+    // The head front face is an 8x8 region starting at x=8, y=8.
+    const totalImgSize = size * 8
+    const offset = -size
+
+    return (
+      <div
+        style={{
+          width: size,
+          height: size,
+          overflow: "hidden",
+          borderRadius: 4,
+          flexShrink: 0,
+          position: "relative",
+          backgroundColor: "#2a2a2a",
+        }}
+      >
+        <img
+          src={skinImageUrl}
+          alt={displayName}
+          onError={() => setImgError(true)}
+          style={{
+            width: totalImgSize,
+            height: totalImgSize,
+            marginLeft: offset,
+            marginTop: offset,
+            imageRendering: "pixelated",
+            display: "block",
+          }}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 4,
+        flexShrink: 0,
+        backgroundColor: "rgba(62, 196, 192, 0.15)",
+        color: "#3ec4c0",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: Math.max(10, Math.floor(size * 0.45)),
+        fontWeight: 700,
+        userSelect: "none",
+      }}
+    >
+      {displayName.slice(0, 2).toUpperCase()}
+    </div>
+  )
+}
+
 export default function ServerWhitelistCard({
   theme,
   serverId,
@@ -18,18 +86,25 @@ export default function ServerWhitelistCard({
   const isDark = theme === "dark"
   const tokens = getThemeTokens(theme)
   const [whitelist, setWhitelist] = useState<ServerWhitelist | null>(null)
+  const [candidates, setCandidates] = useState<HikatWhitelistCandidate[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [toggling, setToggling] = useState<boolean>(false)
   const [adding, setAdding] = useState<boolean>(false)
   const [removingName, setRemovingName] = useState<string | null>(null)
   const [playerNameInput, setPlayerNameInput] = useState<string>("")
+  const [showDropdown, setShowDropdown] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const fetchWhitelist = useCallback(async () => {
     try {
       setError(null)
-      const data = await serverWhitelistApi.getServerWhitelist(serverId)
+      const [data, cands] = await Promise.all([
+        serverWhitelistApi.getServerWhitelist(serverId),
+        serverWhitelistApi.getHikatWhitelistCandidates().catch(() => []),
+      ])
       setWhitelist(data)
+      setCandidates(cands || [])
     } catch (err: any) {
       const msg = err.message || "Error al cargar la whitelist"
       setError(msg)
@@ -67,6 +142,7 @@ export default function ServerWhitelistCard({
     if (!clean || adding) return
 
     setAdding(true)
+    setShowDropdown(false)
     try {
       const updated = await serverWhitelistApi.addServerWhitelistPlayer(serverId, clean)
       setWhitelist(updated)
@@ -99,6 +175,18 @@ export default function ServerWhitelistCard({
     whitelist?.mode === "HIKAT"
       ? "Whitelist de HiKAT"
       : "Whitelist nativa de Minecraft"
+
+  const filteredCandidates =
+    whitelist?.mode === "HIKAT"
+      ? candidates.filter((c) => {
+          const cleanInput = playerNameInput.trim().toLowerCase()
+          const matchesSearch = cleanInput ? c.displayName.toLowerCase().includes(cleanInput) : true
+          const alreadyInWhitelist = whitelist.entries.some(
+            (e) => e.name.toLowerCase() === c.displayName.toLowerCase(),
+          )
+          return matchesSearch && !alreadyInWhitelist
+        })
+      : []
 
   return (
     <div
@@ -220,31 +308,107 @@ export default function ServerWhitelistCard({
         </div>
       )}
 
-      {/* Add Player Input Form */}
+      {/* Add Player Input Form with Autocomplete */}
       <form
         onSubmit={handleAddPlayer}
         style={{
           display: "flex",
           gap: 8,
+          position: "relative",
         }}
       >
-        <input
-          type="text"
-          value={playerNameInput}
-          onChange={(e) => setPlayerNameInput(e.target.value)}
-          placeholder="Nombre del jugador..."
-          disabled={loading || adding}
-          style={{
-            flex: 1,
-            padding: "8px 12px",
-            fontSize: "0.85rem",
-            backgroundColor: tokens.bgInput,
-            color: tokens.textPrimary,
-            border: `1px solid ${tokens.borderSubtle}`,
-            borderRadius: 10,
-            outline: "none",
-          }}
-        />
+        <div style={{ position: "relative", flex: 1 }}>
+          <input
+            ref={inputRef}
+            type="text"
+            value={playerNameInput}
+            onChange={(e) => {
+              setPlayerNameInput(e.target.value)
+              setShowDropdown(true)
+            }}
+            onFocus={() => setShowDropdown(true)}
+            onBlur={() => setShowDropdown(false)}
+            placeholder="Nombre del jugador..."
+            disabled={loading || adding}
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              padding: "8px 12px",
+              fontSize: "0.85rem",
+              backgroundColor: tokens.bgInput,
+              color: tokens.textPrimary,
+              border: `1px solid ${tokens.borderSubtle}`,
+              borderRadius: 10,
+              outline: "none",
+            }}
+          />
+
+          {/* Autocomplete Dropdown */}
+          {showDropdown && filteredCandidates.length > 0 && (
+            <div
+              data-testid="candidates-dropdown"
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                left: 0,
+                right: 0,
+                backgroundColor: tokens.bgCard,
+                border: `1px solid ${tokens.borderSubtle}`,
+                borderRadius: 10,
+                boxShadow: isDark
+                  ? "0 10px 25px -5px rgba(0, 0, 0, 0.6)"
+                  : "0 10px 25px -5px rgba(0, 0, 0, 0.1)",
+                maxHeight: 180,
+                overflowY: "auto",
+                zIndex: 50,
+                padding: "4px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+              }}
+              className="custom-scroll"
+            >
+              {filteredCandidates.slice(0, 10).map((c) => (
+                <button
+                  key={c.displayName}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    setPlayerNameInput(c.displayName)
+                    setShowDropdown(false)
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "none",
+                    backgroundColor: "transparent",
+                    color: tokens.textPrimary,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    width: "100%",
+                    fontSize: "0.85rem",
+                    transition: "background-color 0.15s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = isDark
+                      ? "rgba(255, 255, 255, 0.08)"
+                      : "rgba(0, 0, 0, 0.05)"
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = "transparent"
+                  }}
+                >
+                  <PlayerAvatar displayName={c.displayName} skinImageUrl={c.skinImageUrl} size={22} />
+                  <span style={{ fontWeight: 500 }}>{c.displayName}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <button
           type="submit"
           disabled={loading || adding || !playerNameInput.trim()}
@@ -262,6 +426,8 @@ export default function ServerWhitelistCard({
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
+            height: "fit-content",
+            alignSelf: "flex-start",
           }}
         >
           {adding && <IconSpinner size={13} />}
@@ -298,58 +464,73 @@ export default function ServerWhitelistCard({
             Cargando whitelist...
           </div>
         ) : whitelist?.entries && whitelist.entries.length > 0 ? (
-          whitelist.entries.map((entry) => (
-            <div
-              key={entry.name}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "8px 12px",
-                borderRadius: 8,
-                backgroundColor: tokens.bgInput,
-                border: `1px solid ${tokens.borderSubtle}`,
-              }}
-            >
-              <span
-                style={{
-                  fontSize: "0.85rem",
-                  fontWeight: 500,
-                  color: tokens.textPrimary,
-                }}
-              >
-                {entry.name}
-              </span>
+          whitelist.entries.map((entry) => {
+            const matchedCandidate = candidates.find(
+              (c) => c.displayName.toLowerCase() === entry.name.toLowerCase(),
+            )
 
-              <button
-                type="button"
-                onClick={() => handleRemovePlayer(entry.name)}
-                disabled={removingName === entry.name}
-                title={`Eliminar ${entry.name}`}
+            return (
+              <div
+                key={entry.name}
                 style={{
-                  background: "none",
-                  border: "none",
-                  color:
-                    removingName === entry.name
-                      ? tokens.textMuted
-                      : isDark ? "#f87171" : "#dc2626",
-                  cursor:
-                    removingName === entry.name ? "not-allowed" : "pointer",
-                  padding: "4px",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: 6,
+                  justifyContent: "space-between",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  backgroundColor: tokens.bgInput,
+                  border: `1px solid ${tokens.borderSubtle}`,
                 }}
               >
-                {removingName === entry.name ? (
-                  <IconSpinner size={13} />
-                ) : (
-                  <IconTrash size={14} />
-                )}
-              </button>
-            </div>
-          ))
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {whitelist.mode === "HIKAT" && (
+                    <PlayerAvatar
+                      displayName={entry.name}
+                      skinImageUrl={matchedCandidate?.skinImageUrl}
+                      size={22}
+                    />
+                  )}
+                  <span
+                    style={{
+                      fontSize: "0.85rem",
+                      fontWeight: 500,
+                      color: tokens.textPrimary,
+                    }}
+                  >
+                    {entry.name}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleRemovePlayer(entry.name)}
+                  disabled={removingName === entry.name}
+                  title={`Eliminar ${entry.name}`}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color:
+                      removingName === entry.name
+                        ? tokens.textMuted
+                        : isDark ? "#f87171" : "#dc2626",
+                    cursor:
+                      removingName === entry.name ? "not-allowed" : "pointer",
+                    padding: "4px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderRadius: 6,
+                  }}
+                >
+                  {removingName === entry.name ? (
+                    <IconSpinner size={13} />
+                  ) : (
+                    <IconTrash size={14} />
+                  )}
+                </button>
+              </div>
+            )
+          })
         ) : (
           <div
             style={{
@@ -366,3 +547,4 @@ export default function ServerWhitelistCard({
     </div>
   )
 }
+

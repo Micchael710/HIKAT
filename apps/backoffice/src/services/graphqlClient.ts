@@ -3205,6 +3205,19 @@ export const serverWhitelistApi = {
     })
     return data.removeServerWhitelistPlayer
   },
+
+  async getHikatWhitelistCandidates(): Promise<import("../types").HikatWhitelistCandidate[]> {
+    const query = /* GraphQL */ `
+      query HikatWhitelistCandidates {
+        hikatWhitelistCandidates {
+          displayName
+          skinImageUrl
+        }
+      }
+    `
+    const data = await executeGraphQL<{ hikatWhitelistCandidates: import("../types").HikatWhitelistCandidate[] }>(query)
+    return data.hikatWhitelistCandidates
+  },
 }
 
 export const graphqlClient = {

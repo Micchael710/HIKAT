@@ -11,12 +11,14 @@ vi.mock("../../services/graphqlClient", () => ({
     setServerWhitelistEnabled: vi.fn(),
     addServerWhitelistPlayer: vi.fn(),
     removeServerWhitelistPlayer: vi.fn(),
+    getHikatWhitelistCandidates: vi.fn(),
   },
 }))
 
 describe("ServerWhitelistCard Component", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(serverWhitelistApi.getHikatWhitelistCandidates).mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -117,5 +119,40 @@ describe("ServerWhitelistCard Component", () => {
     await waitFor(() => {
       expect(serverWhitelistApi.removeServerWhitelistPlayer).toHaveBeenCalledWith("srv-1", "Alex")
     })
+  })
+
+  it("suggests registered candidates in autocomplete dropdown and selects one on click", async () => {
+    vi.mocked(serverWhitelistApi.getServerWhitelist).mockResolvedValue({
+      enabled: true,
+      mode: "HIKAT",
+      entries: [{ name: "Alex", addedAt: null }],
+    })
+    vi.mocked(serverWhitelistApi.getHikatWhitelistCandidates).mockResolvedValue([
+      { displayName: "Alex", skinImageUrl: "/media/alex.png" },
+      { displayName: "vBrayan06", skinImageUrl: "/media/custom.png" },
+      { displayName: "Steve", skinImageUrl: null },
+    ])
+
+    render(<ServerWhitelistCard theme="dark" serverId="srv-1" />)
+
+    await waitFor(() => {
+      expect(screen.getByText("Alex")).toBeDefined()
+    })
+
+    const input = screen.getByPlaceholderText("Nombre del jugador...")
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: "vB" } })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("candidates-dropdown")).toBeDefined()
+      // "Alex" is already in whitelist, so only "vBrayan06" matches "vB" and is not in entries
+      expect(screen.getByText("vBrayan06")).toBeDefined()
+    })
+
+    // Click candidate suggestion
+    const candidateBtn = screen.getByText("vBrayan06")
+    fireEvent.mouseDown(candidateBtn)
+
+    expect((input as HTMLInputElement).value).toBe("vBrayan06")
   })
 })
