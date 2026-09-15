@@ -44,4 +44,51 @@ public class ConnectionGateTest {
         assertThrows(IllegalArgumentException.class, () -> ConnectionGate.computePlayerUuid(""));
         assertThrows(IllegalArgumentException.class, () -> ConnectionGate.computePlayerUuid("   "));
     }
+
+    @Test
+    public void testAuthResponseLinkageErrorDuringVerifyDisconnectsWithAuthFailed(@org.junit.jupiter.api.io.TempDir java.nio.file.Path tempDir) throws Exception {
+        com.hikat.server.GameTokenVerifier brokenVerifier = new com.hikat.server.GameTokenVerifier("hikat-minecraft", null, null) {
+            @Override
+            public VerifiedClaims verify(String token) {
+                throw new NoClassDefFoundError("Simulated LinkageError during JWT parsing or crypto");
+            }
+        };
+
+        com.hikat.server.HiKatWhitelist whitelist = new com.hikat.server.HiKatWhitelist(tempDir);
+        com.hikat.server.IntegrityService integrityService = new com.hikat.server.IntegrityService(tempDir);
+        ConnectionGate gate = new ConnectionGate(brokenVerifier, integrityService, whitelist);
+
+        Class<?> listenerClass = Class.forName("net.minecraft.network.protocol.configuration.ServerConfigurationPacketListener");
+        java.util.concurrent.atomic.AtomicReference<Object> disconnectedComponent = new java.util.concurrent.atomic.AtomicReference<>();
+
+        Object proxyListener = java.lang.reflect.Proxy.newProxyInstance(
+            listenerClass.getClassLoader(),
+            new Class<?>[]{listenerClass},
+            (proxy, method, args) -> {
+                if ("disconnect".equals(method.getName()) && args != null && args.length == 1) {
+                    disconnectedComponent.set(args[0]);
+                }
+                return null;
+            }
+        );
+
+        java.lang.reflect.Method handleAuthMethod = ConnectionGate.class.getMethod(
+            "handleAuthResponse",
+            listenerClass,
+            com.hikat.network.HiKatProtocol.AuthResponsePayload.class,
+            Runnable.class
+        );
+
+        com.hikat.network.HiKatProtocol.AuthResponsePayload payload =
+            new com.hikat.network.HiKatProtocol.AuthResponsePayload("dummy-token", "rel-1", "fingerprint-1");
+
+        handleAuthMethod.invoke(gate, proxyListener, payload, (Runnable) () -> {});
+
+        assertNotNull(disconnectedComponent.get(), "Player must be disconnected on LinkageError");
+        Object comp = disconnectedComponent.get();
+
+        Object contents = comp.getClass().getMethod("getContents").invoke(comp);
+        String key = (String) contents.getClass().getMethod("getKey").invoke(contents);
+        assertEquals("disconnect.hikat.auth_failed", key);
+    }
 }

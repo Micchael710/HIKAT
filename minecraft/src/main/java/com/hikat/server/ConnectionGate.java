@@ -58,7 +58,7 @@ public class ConnectionGate {
         try {
             // 1. Verify Game JWT
             claims = tokenVerifier.verify(payload.gameToken());
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
             System.err.println("[HiKAT] Game token verification failed: " + e.getMessage());
             listener.disconnect(Component.translatable("disconnect.hikat.auth_failed"));
             return;
