@@ -95,4 +95,50 @@ public class GameTokenVerifierTest {
 
         assertThrows(SecurityException.class, () -> verifier.verify(rogueJwt.serialize()));
     }
+
+    private String createTokenWithIssuer(String sub, String displayName, String role, String audience, String issuer, long ttlMillis) throws Exception {
+        ECDSASigner signer = new ECDSASigner(ecJWK);
+
+        JWTClaimsSet.Builder builder = new JWTClaimsSet.Builder()
+            .subject(sub)
+            .claim("displayName", displayName)
+            .claim("role", role)
+            .audience(Collections.singletonList(audience))
+            .expirationTime(new Date(System.currentTimeMillis() + ttlMillis))
+            .issueTime(new Date());
+
+        if (issuer != null) {
+            builder.issuer(issuer);
+        }
+
+        SignedJWT signedJWT = new SignedJWT(
+            new JWSHeader.Builder(JWSAlgorithm.ES256).keyID(ecJWK.getKeyID()).build(),
+            builder.build()
+        );
+        signedJWT.sign(signer);
+        return signedJWT.serialize();
+    }
+
+    @Test
+    public void testVerifyValidTokenWithCorrectIssuer() throws Exception {
+        String token = createTokenWithIssuer("usr_123", "Steve", "PLAYER", "hikat-minecraft", "https://auth.hikat.org", 180000);
+        GameTokenVerifier.VerifiedClaims claims = verifier.verify(token);
+
+        assertNotNull(claims);
+        assertEquals("usr_123", claims.sub());
+        assertEquals("Steve", claims.displayName());
+        assertEquals("PLAYER", claims.role());
+    }
+
+    @Test
+    public void testVerifyTokenWithInvalidIssuerRejected() throws Exception {
+        String token = createTokenWithIssuer("usr_123", "Steve", "PLAYER", "hikat-minecraft", "https://evil.auth.org", 180000);
+        assertThrows(SecurityException.class, () -> verifier.verify(token));
+    }
+
+    @Test
+    public void testVerifyTokenWithoutIssuerRejected() throws Exception {
+        String token = createTokenWithIssuer("usr_123", "Steve", "PLAYER", "hikat-minecraft", null, 180000);
+        assertThrows(SecurityException.class, () -> verifier.verify(token));
+    }
 }

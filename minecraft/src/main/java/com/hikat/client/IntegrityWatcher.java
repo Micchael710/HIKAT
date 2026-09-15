@@ -182,7 +182,7 @@ public class IntegrityWatcher {
                         rescanAll();
                     } else {
                         for (Path changed : changedPaths) {
-                            if (Files.isDirectory(changed)) {
+                            if (Files.isDirectory(changed) && !Files.isSymbolicLink(changed)) {
                                 try (var stream = Files.walk(changed)) {
                                     stream.filter(Files::isRegularFile).forEach(this::rehashFile);
                                 } catch (IOException ignored) {}
@@ -205,21 +205,25 @@ public class IntegrityWatcher {
     }
 
     private void rehashFile(Path file) {
+        String rel = null;
         try {
-            String rel = FingerprintUtil.normalizePath(gameRoot.relativize(file).toString());
-            if (rel.isEmpty() || !FingerprintUtil.isSafePath(gameRoot, rel)) {
+            rel = FingerprintUtil.normalizePath(gameRoot.relativize(file).toString());
+            if (rel.isEmpty()) {
                 return;
             }
 
             boolean isOfficial = officialProtected.contains(rel);
 
             if (isOfficial) {
-                if (Files.isRegularFile(file)) {
+                if (Files.isRegularFile(file) && FingerprintUtil.isSafePath(gameRoot, rel)) {
                     currentHashes.put(rel, FingerprintUtil.sha256Hex(file));
                 } else {
                     currentHashes.put(rel, "MISSING");
                 }
             } else {
+                if (!FingerprintUtil.isSafePath(gameRoot, rel)) {
+                    return;
+                }
                 // Unknown / Extra file
                 String policy = sessionData != null ? sessionData.resolveEffectivePolicy(rel) : null;
                 if ("NO_MODIFICABLE".equalsIgnoreCase(policy)) {
@@ -232,7 +236,11 @@ public class IntegrityWatcher {
                     currentHashes.remove(rel);
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            if (rel != null && officialProtected.contains(rel)) {
+                currentHashes.put(rel, "ERROR");
+            }
+        }
     }
 
     private void rescanAll() {

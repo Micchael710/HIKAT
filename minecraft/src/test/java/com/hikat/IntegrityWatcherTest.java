@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -316,6 +317,61 @@ public class IntegrityWatcherTest {
             awaitCondition(() -> updatedFingerprint.get() != null, 2500);
             assertNotNull(updatedFingerprint.get(), "Arbitrary directory NO_MODIFICABLE violation must be detected");
             assertTrue(watcher.getCurrentHashes().containsKey("scripts/cheat.zs"));
+        } finally {
+            watcher.stop();
+        }
+    }
+
+    @Test
+    public void testProtectedFileReplacedBySymlinkDetectedByWatcher(@TempDir Path tempDir) throws Exception {
+        // 1. A normal protected file exists
+        Path modsDir = tempDir.resolve("mods");
+        Files.createDirectories(modsDir);
+        Path officialMod = modsDir.resolve("official.jar");
+        Files.writeString(officialMod, "official-binary-content");
+
+        Path externalDir = tempDir.resolve("external");
+        Files.createDirectories(externalDir);
+        Path externalTarget = externalDir.resolve("target.jar");
+        Files.writeString(externalTarget, "official-binary-content");
+
+        String initHash = FingerprintUtil.sha256Hex(officialMod);
+        Map<String, String> initialHashes = new HashMap<>();
+        initialHashes.put("mods/official.jar", initHash);
+        String initFingerprint = FingerprintUtil.computeCanonicalFingerprint(initialHashes);
+
+        SessionData sessionData = new SessionData(
+            1, "rel-v1", "token-xyz",
+            List.of("mods/official.jar"),
+            List.of(new SessionData.PolicyEntry("mods/official.jar", "NO_MODIFICABLE")),
+            List.of(new SessionData.PolicyEntry("mods", "NO_MODIFICABLE"))
+        );
+
+        AtomicReference<String> updatedFingerprint = new AtomicReference<>();
+        IntegrityWatcher watcher = new IntegrityWatcher(
+            tempDir,
+            sessionData,
+            initialHashes,
+            initFingerprint,
+            updatedFingerprint::set
+        );
+
+        // 2. Starts the watcher
+        watcher.start();
+        try {
+            // 3. The file is replaced by a symlink
+            Files.delete(officialMod);
+            try {
+                Files.createSymbolicLink(officialMod, externalTarget);
+            } catch (UnsupportedOperationException | java.nio.file.FileSystemException | SecurityException e) {
+                Assumptions.abort("Symlinks not supported in this environment: " + e.getMessage());
+            }
+
+            // 4. Verify that fingerprint changes and the violation is detected
+            awaitCondition(() -> updatedFingerprint.get() != null, 2500);
+            assertNotNull(updatedFingerprint.get(), "Watcher must detect symlink replacement of protected file");
+            assertNotEquals(initFingerprint, updatedFingerprint.get(), "Fingerprint must change when protected file is replaced with a symlink");
+            assertEquals("MISSING", watcher.getCurrentHashes().get("mods/official.jar"));
         } finally {
             watcher.stop();
         }

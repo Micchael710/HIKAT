@@ -38,6 +38,8 @@ public class GameTokenVerifier {
         }
     }
 
+    public static final String EXPECTED_ISSUER = "https://auth.hikat.org";
+
     public VerifiedClaims verify(String token) throws Exception {
         if (token == null || token.isBlank()) {
             throw new IllegalArgumentException("Token is missing");
@@ -70,6 +72,11 @@ public class GameTokenVerifier {
         }
 
         JWTClaimsSet claims = signedJWT.getJWTClaimsSet();
+
+        String issuer = claims.getIssuer();
+        if (issuer == null || !EXPECTED_ISSUER.equals(issuer)) {
+            throw new SecurityException("Invalid or missing issuer: " + issuer);
+        }
 
         List<String> audience = claims.getAudience();
         if (audience == null || !audience.contains(expectedAudience)) {
