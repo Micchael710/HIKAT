@@ -11,7 +11,14 @@ import type {
   ServerAutomationFrequency,
   ServerTaskTemplate,
   ServerProvisioningStatus,
+  ServerWhitelistMode,
+  ServerWhitelistEntry,
+  ServerWhitelist,
 } from "@hikat/shared"
+
+export type ServerWhitelistModeGql = ServerWhitelistMode
+export type ServerWhitelistEntryGql = ServerWhitelistEntry
+export type ServerWhitelistGql = ServerWhitelist
 
 export type ServerProvisioningStatusGql = ServerProvisioningStatus
 

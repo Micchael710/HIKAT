@@ -3126,6 +3126,87 @@ export const serverContentApi = {
   },
 }
 
+export const serverWhitelistApi = {
+  async getServerWhitelist(serverId?: string): Promise<import("../types").ServerWhitelist> {
+    const query = /* GraphQL */ `
+      query ServerWhitelist($serverId: ID) {
+        serverWhitelist(serverId: $serverId) {
+          enabled
+          mode
+          entries {
+            name
+            addedAt
+          }
+        }
+      }
+    `
+    const data = await executeGraphQL<{ serverWhitelist: import("../types").ServerWhitelist }>(query, {
+      serverId,
+    })
+    return data.serverWhitelist
+  },
+
+  async setServerWhitelistEnabled(serverId: string | undefined, enabled: boolean): Promise<import("../types").ServerWhitelist> {
+    const mutation = /* GraphQL */ `
+      mutation SetServerWhitelistEnabled($serverId: ID, $enabled: Boolean!) {
+        setServerWhitelistEnabled(serverId: $serverId, enabled: $enabled) {
+          enabled
+          mode
+          entries {
+            name
+            addedAt
+          }
+        }
+      }
+    `
+    const data = await executeGraphQL<{ setServerWhitelistEnabled: import("../types").ServerWhitelist }>(mutation, {
+      serverId,
+      enabled,
+    })
+    return data.setServerWhitelistEnabled
+  },
+
+  async addServerWhitelistPlayer(serverId: string | undefined, name: string): Promise<import("../types").ServerWhitelist> {
+    const mutation = /* GraphQL */ `
+      mutation AddServerWhitelistPlayer($serverId: ID, $name: String!) {
+        addServerWhitelistPlayer(serverId: $serverId, name: $name) {
+          enabled
+          mode
+          entries {
+            name
+            addedAt
+          }
+        }
+      }
+    `
+    const data = await executeGraphQL<{ addServerWhitelistPlayer: import("../types").ServerWhitelist }>(mutation, {
+      serverId,
+      name,
+    })
+    return data.addServerWhitelistPlayer
+  },
+
+  async removeServerWhitelistPlayer(serverId: string | undefined, name: string): Promise<import("../types").ServerWhitelist> {
+    const mutation = /* GraphQL */ `
+      mutation RemoveServerWhitelistPlayer($serverId: ID, $name: String!) {
+        removeServerWhitelistPlayer(serverId: $serverId, name: $name) {
+          enabled
+          mode
+          entries {
+            name
+            addedAt
+          }
+        }
+      }
+    `
+    const data = await executeGraphQL<{ removeServerWhitelistPlayer: import("../types").ServerWhitelist }>(mutation, {
+      serverId,
+      name,
+    })
+    return data.removeServerWhitelistPlayer
+  },
+}
+
 export const graphqlClient = {
   ...newsApi,
   ...serverApi,
@@ -3134,6 +3215,7 @@ export const graphqlClient = {
   ...settingsApi,
   ...modProvidersApi,
   ...serverContentApi,
+  ...serverWhitelistApi,
 }
 
 

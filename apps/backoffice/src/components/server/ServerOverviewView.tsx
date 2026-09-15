@@ -11,6 +11,7 @@ import ServerConsoleView from "./ServerConsoleView"
 import ServerBackupsView from "./ServerBackupsView"
 import ServerTasksView from "./ServerTasksView"
 import ServerFilesView from "./ServerFilesView"
+import ServerWhitelistCard from "./ServerWhitelistCard"
 import LiveToast from "../common/LiveToast"
 import {
   IconServer,
@@ -751,129 +752,147 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
                 />
               </div>
 
-              {/* Live Console Card */}
+              {/* Two-Column Grid: Live Console (Left) & Whitelist (Right) */}
               <div
                 style={{
-                  padding: "20px 24px",
-                  borderRadius: 18,
-                  background: tokens.bgCard,
-                  border: `1px solid ${tokens.borderSubtle}`,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 14,
-                  boxShadow: tokens.cardShadow,
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+                  gap: 16,
+                  alignItems: "start",
                 }}
               >
+                {/* Live Console Card */}
                 <div
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ color: isDark ? "#3ec4c0" : "#0c6e6b" }}>
-                      <IconTerminal size={20} />
-                    </div>
-                    <h3
-                      style={{
-                        margin: 0,
-                        fontSize: "1.1rem",
-                        fontWeight: 700,
-                        color: tokens.textPrimary,
-                      }}
-                    >
-                      Consola en vivo
-                    </h3>
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 5,
-                        fontSize: "0.75rem",
-                        color: isConsoleConnected
-                          ? isDark ? "#4ade80" : "#16a34a"
-                          : tokens.textMuted,
-                        fontWeight: 600,
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: "50%",
-                          background: isConsoleConnected ? "#4ade80" : "#94a3b8",
-                        }}
-                      />
-                      {isConsoleConnected ? "Conectada" : "En espera"}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("console")}
-                    className="launcher-btn-secondary"
-                    style={{
-                      fontSize: "12px",
-                      padding: "6px 14px",
-                      borderRadius: "10px",
-                    }}
-                  >
-                    <span>Abrir consola →</span>
-                  </button>
-                </div>
-
-                {/* Console Log Preview Window */}
-                <div
-                  ref={liveLogsContainerRef}
-                  style={{
-                    padding: "14px 16px",
-                    borderRadius: 12,
-                    background: isDark ? "#0b1116" : "#0f172a",
-                    border: `1px solid ${
-                      isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.2)"
-                    }`,
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                    fontSize: "0.8rem",
-                    lineHeight: 1.5,
-                    color: "#e2e8f0",
-                    height: 180,
-                    overflowY: "auto",
+                    padding: "20px 24px",
+                    borderRadius: 18,
+                    background: tokens.bgCard,
+                    border: `1px solid ${tokens.borderSubtle}`,
                     display: "flex",
                     flexDirection: "column",
+                    gap: 14,
+                    boxShadow: tokens.cardShadow,
+                    boxSizing: "border-box",
                   }}
-                  className="custom-scroll"
                 >
-                  {liveLogs.length === 0 ? (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        height: "100%",
-                        color: "rgba(255, 255, 255, 0.35)",
-                        fontSize: "0.85rem",
-                      }}
-                    >
-                      {currentStatus === "OFFLINE"
-                        ? "El servidor está apagado."
-                        : "Esperando registros de consola..."}
-                    </div>
-                  ) : (
-                    liveLogs.map((log) => (
-                      <div
-                        key={log.id}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ color: isDark ? "#3ec4c0" : "#0c6e6b" }}>
+                        <IconTerminal size={20} />
+                      </div>
+                      <h3
                         style={{
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-all",
-                          color: log.type === "stderr" ? "#f87171" : "#cbd5e1",
+                          margin: 0,
+                          fontSize: "1.1rem",
+                          fontWeight: 700,
+                          color: tokens.textPrimary,
                         }}
                       >
-                        {log.line}
+                        Consola en vivo
+                      </h3>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5,
+                          fontSize: "0.75rem",
+                          color: isConsoleConnected
+                            ? isDark ? "#4ade80" : "#16a34a"
+                            : tokens.textMuted,
+                          fontWeight: 600,
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: isConsoleConnected ? "#4ade80" : "#94a3b8",
+                          }}
+                        />
+                        {isConsoleConnected ? "Conectada" : "En espera"}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("console")}
+                      className="launcher-btn-secondary"
+                      style={{
+                        fontSize: "12px",
+                        padding: "6px 14px",
+                        borderRadius: "10px",
+                      }}
+                    >
+                      <span>Abrir consola →</span>
+                    </button>
+                  </div>
+
+                  {/* Console Log Preview Window */}
+                  <div
+                    ref={liveLogsContainerRef}
+                    style={{
+                      padding: "14px 16px",
+                      borderRadius: 12,
+                      background: isDark ? "#0b1116" : "#0f172a",
+                      border: `1px solid ${
+                        isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.2)"
+                      }`,
+                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                      fontSize: "0.8rem",
+                      lineHeight: 1.5,
+                      color: "#e2e8f0",
+                      height: 180,
+                      overflowY: "auto",
+                      display: "flex",
+                      flexDirection: "column",
+                    }}
+                    className="custom-scroll"
+                  >
+                    {liveLogs.length === 0 ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          height: "100%",
+                          color: "rgba(255, 255, 255, 0.35)",
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        {currentStatus === "OFFLINE"
+                          ? "El servidor está apagado."
+                          : "Esperando registros de consola..."}
                       </div>
-                    ))
-                  )}
+                    ) : (
+                      liveLogs.map((log) => (
+                        <div
+                          key={log.id}
+                          style={{
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-all",
+                            color: log.type === "stderr" ? "#f87171" : "#cbd5e1",
+                          }}
+                        >
+                          {log.line}
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
+
+                {/* Whitelist Card */}
+                <ServerWhitelistCard
+                  theme={theme}
+                  serverId={serverId}
+                  onToast={showToast}
+                />
               </div>
             </>
           )}

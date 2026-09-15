@@ -119,6 +119,31 @@ export const serverTypeDefs = /* GraphQL */ `
     allowFlight: Boolean
   }
 
+  """
+  Server whitelist operating mode
+  """
+  enum ServerWhitelistMode {
+    HIKAT
+    MINECRAFT_NATIVE
+  }
+
+  """
+  Individual player entry in server whitelist
+  """
+  type ServerWhitelistEntry {
+    name: String!
+    addedAt: String
+  }
+
+  """
+  Server whitelist status and list of allowed players
+  """
+  type ServerWhitelist {
+    enabled: Boolean!
+    mode: ServerWhitelistMode!
+    entries: [ServerWhitelistEntry!]!
+  }
+
   enum ServerTaskTemplate {
     AUTO_STOP
     AUTO_START
@@ -578,6 +603,11 @@ export const serverTypeDefs = /* GraphQL */ `
     Retrieves available hardware capacity from Pterodactyl node for server provisioning - requires ADMIN role
     """
     serverNodeCapacity: ServerNodeCapacity!
+
+    """
+    Retrieves server whitelist state and entries - requires ADMIN role
+    """
+    serverWhitelist(serverId: ID): ServerWhitelist!
   }
 
   """
@@ -752,5 +782,20 @@ export const serverTypeDefs = /* GraphQL */ `
     Applies release synchronization to server (syncs BOTH mods from published release to server) - requires ADMIN role
     """
     applyServerReleaseSync(serverId: ID, createBackup: Boolean): ServerReleaseSyncResult!
+
+    """
+    Toggles server whitelist on/off - requires ADMIN role
+    """
+    setServerWhitelistEnabled(serverId: ID, enabled: Boolean!): ServerWhitelist!
+
+    """
+    Adds a player to the server whitelist by name - requires ADMIN role
+    """
+    addServerWhitelistPlayer(serverId: ID, name: String!): ServerWhitelist!
+
+    """
+    Removes a player from the server whitelist by name - requires ADMIN role
+    """
+    removeServerWhitelistPlayer(serverId: ID, name: String!): ServerWhitelist!
   }
 `

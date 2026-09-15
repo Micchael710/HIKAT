@@ -58,8 +58,8 @@ public class ConnectionGate {
             // 1. Verify Game JWT
             GameTokenVerifier.VerifiedClaims claims = tokenVerifier.verify(payload.gameToken());
 
-            // 2. Enforce Whitelist by userId (sub)
-            if (!whitelist.isAllowed(claims.sub())) {
+            // 2. Enforce Whitelist by userId (sub) or displayName
+            if (!whitelist.isAllowed(claims.sub(), claims.displayName())) {
                 listener.disconnect(Component.literal("You are not whitelisted on this server (ID: " + claims.sub() + ")"));
                 return;
             }

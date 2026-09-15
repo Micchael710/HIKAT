@@ -959,3 +959,16 @@ export interface ServerReleaseSyncResult {
   status: ServerReleaseSyncStatusEnum
 }
 
+export type ServerWhitelistMode = "HIKAT" | "MINECRAFT_NATIVE"
+
+export interface ServerWhitelistEntry {
+  name: string
+  addedAt?: string | null
+}
+
+export interface ServerWhitelist {
+  enabled: boolean
+  mode: ServerWhitelistMode
+  entries: ServerWhitelistEntry[]
+}
+

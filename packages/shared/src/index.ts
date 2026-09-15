@@ -273,6 +273,20 @@ export const SERVER_LIMITS = {
   MAX_CPU_PERCENT: SERVER_MAX_CPU_PERCENT,
 } as const
 
+export const ALLOWED_SERVER_WHITELIST_MODES = ["HIKAT", "MINECRAFT_NATIVE"] as const
+export type ServerWhitelistMode = typeof ALLOWED_SERVER_WHITELIST_MODES[number]
+
+export interface ServerWhitelistEntry {
+  name: string
+  addedAt?: string | null
+}
+
+export interface ServerWhitelist {
+  enabled: boolean
+  mode: ServerWhitelistMode
+  entries: ServerWhitelistEntry[]
+}
+
 export interface ServerResourcesData {
   status: ServerStatus
   cpuPercent: number

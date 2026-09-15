@@ -27,6 +27,7 @@ import type {
   UpdateMinecraftServerSettingsInputGql,
   ServerAutomationItemGql,
   ServerAutomationInputGql,
+  ServerWhitelistGql,
   ServerFileRootGql,
   ServerFileItemGql,
   ServerFileContentGql,
@@ -191,6 +192,12 @@ import {
   getServerReleaseSyncStatus,
   applyServerReleaseSync,
 } from "../services/pterodactyl/serverReleaseSyncService"
+import {
+  getServerWhitelist,
+  setServerWhitelistEnabled,
+  addServerWhitelistPlayer,
+  removeServerWhitelistPlayer,
+} from "../services/pterodactyl/serverWhitelistService"
 import { getAdminDashboard } from "../services/dashboardService"
 
 import {
@@ -641,6 +648,18 @@ export const resolvers = {
     ): Promise<import("../services/serverService").ServerNodeCapacityData> => {
       requireAdmin(context)
       return getServerNodeCapacity(context.env)
+    },
+
+    serverWhitelist: async (
+      _parent: unknown,
+      args: { serverId?: string | null } | undefined,
+      context: BackendGraphQLContext,
+    ): Promise<ServerWhitelistGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getServerWhitelist(context.db, context.env, args?.serverId)
     },
 
 
@@ -1430,6 +1449,42 @@ export const resolvers = {
         Boolean(args.createBackup),
         args.serverId,
       )
+    },
+
+    setServerWhitelistEnabled: async (
+      _parent: unknown,
+      args: { enabled: boolean; serverId?: string | null },
+      context: BackendGraphQLContext,
+    ): Promise<ServerWhitelistGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return setServerWhitelistEnabled(context.db, context.env, args.enabled, args.serverId)
+    },
+
+    addServerWhitelistPlayer: async (
+      _parent: unknown,
+      args: { name: string; serverId?: string | null },
+      context: BackendGraphQLContext,
+    ): Promise<ServerWhitelistGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return addServerWhitelistPlayer(context.db, context.env, args.name, args.serverId)
+    },
+
+    removeServerWhitelistPlayer: async (
+      _parent: unknown,
+      args: { name: string; serverId?: string | null },
+      context: BackendGraphQLContext,
+    ): Promise<ServerWhitelistGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return removeServerWhitelistPlayer(context.db, context.env, args.name, args.serverId)
     },
 
     writeServerTextFile: async (

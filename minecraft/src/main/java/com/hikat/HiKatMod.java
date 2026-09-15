@@ -140,36 +140,33 @@ public class HiKatMod {
                         return 1;
                     }))
                     .then(Commands.literal("add")
-                        .then(Commands.argument("userId", StringArgumentType.string())
-                            .then(Commands.argument("displayName", StringArgumentType.string())
-                                .executes(ctx -> {
-                                    String userId = StringArgumentType.getString(ctx, "userId");
-                                    String displayName = StringArgumentType.getString(ctx, "displayName");
-                                    try {
-                                        boolean added = connectionGate.getWhitelist().add(userId, displayName);
-                                        if (added) {
-                                            ctx.getSource().sendSuccess(() -> Component.literal("Added " + displayName + " (" + userId + ") to HiKAT whitelist"), true);
-                                        } else {
-                                            ctx.getSource().sendFailure(Component.literal("Player " + userId + " already in whitelist"));
-                                        }
-                                    } catch (IOException e) {
-                                        ctx.getSource().sendFailure(Component.literal("Error saving whitelist: " + e.getMessage()));
+                        .then(Commands.argument("displayName", StringArgumentType.string())
+                            .executes(ctx -> {
+                                String displayName = StringArgumentType.getString(ctx, "displayName");
+                                try {
+                                    boolean added = connectionGate.getWhitelist().add(displayName);
+                                    if (added) {
+                                        ctx.getSource().sendSuccess(() -> Component.literal("Added " + displayName + " to HiKAT whitelist"), true);
+                                    } else {
+                                        ctx.getSource().sendFailure(Component.literal("Player " + displayName + " already in whitelist"));
                                     }
-                                    return 1;
-                                })
-                            )
+                                } catch (IOException e) {
+                                    ctx.getSource().sendFailure(Component.literal("Error saving whitelist: " + e.getMessage()));
+                                }
+                                return 1;
+                            })
                         )
                     )
                     .then(Commands.literal("remove")
-                        .then(Commands.argument("userId", StringArgumentType.string())
+                        .then(Commands.argument("displayName", StringArgumentType.string())
                             .executes(ctx -> {
-                                String userId = StringArgumentType.getString(ctx, "userId");
+                                String displayName = StringArgumentType.getString(ctx, "displayName");
                                 try {
-                                    boolean removed = connectionGate.getWhitelist().remove(userId);
+                                    boolean removed = connectionGate.getWhitelist().remove(displayName);
                                     if (removed) {
-                                        ctx.getSource().sendSuccess(() -> Component.literal("Removed " + userId + " from HiKAT whitelist"), true);
+                                        ctx.getSource().sendSuccess(() -> Component.literal("Removed " + displayName + " from HiKAT whitelist"), true);
                                     } else {
-                                        ctx.getSource().sendFailure(Component.literal("Player " + userId + " not found in whitelist"));
+                                        ctx.getSource().sendFailure(Component.literal("Player " + displayName + " not found in whitelist"));
                                     }
                                 } catch (IOException e) {
                                     ctx.getSource().sendFailure(Component.literal("Error saving whitelist: " + e.getMessage()));
@@ -183,7 +180,12 @@ public class HiKatMod {
                         boolean enabled = connectionGate.getWhitelist().isEnabled();
                         ctx.getSource().sendSuccess(() -> Component.literal("HiKAT Whitelist (enabled: " + enabled + ", total: " + entries.size() + "):"), false);
                         for (var entry : entries) {
-                            ctx.getSource().sendSuccess(() -> Component.literal(" - " + entry.displayName() + " [" + entry.userId() + "] (added: " + entry.addedAt() + ")"), false);
+                            String label = entry.displayName() != null ? entry.displayName() : entry.userId();
+                            if (entry.userId() != null && entry.displayName() != null) {
+                                label = entry.displayName() + " [" + entry.userId() + "]";
+                            }
+                            final String finalLabel = label;
+                            ctx.getSource().sendSuccess(() -> Component.literal(" - " + finalLabel + " (added: " + entry.addedAt() + ")"), false);
                         }
                         return entries.size();
                     }))

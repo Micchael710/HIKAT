@@ -64,32 +64,58 @@ public class HiKatWhitelist {
         save();
     }
 
-    public synchronized boolean isAllowed(String userId) {
+    public synchronized boolean isAllowed(String userId, String displayName) {
         if (!data.enabled) return true;
-        if (userId == null || userId.isBlank()) return false;
         for (WhitelistEntry entry : data.entries) {
-            if (userId.equals(entry.userId())) {
+            if (userId != null && !userId.isBlank() && entry.userId() != null && userId.equals(entry.userId())) {
+                return true;
+            }
+            if (displayName != null && !displayName.isBlank() && entry.displayName() != null && displayName.equalsIgnoreCase(entry.displayName().trim())) {
                 return true;
             }
         }
         return false;
     }
 
-    public synchronized boolean add(String userId, String displayName) throws IOException {
-        if (userId == null || userId.isBlank()) return false;
+    public synchronized boolean isAllowed(String userId) {
+        return isAllowed(userId, null);
+    }
+
+    public synchronized boolean add(String displayName) throws IOException {
+        if (displayName == null || displayName.isBlank()) return false;
+        String clean = displayName.trim();
         for (WhitelistEntry entry : data.entries) {
-            if (userId.equals(entry.userId())) {
-                return false; // already present
+            if (entry.displayName() != null && entry.displayName().trim().equalsIgnoreCase(clean)) {
+                return false; // already present case-insensitively
             }
         }
-        data.entries.add(new WhitelistEntry(userId, displayName, Instant.now().toString()));
+        data.entries.add(new WhitelistEntry(null, clean, Instant.now().toString()));
         save();
         return true;
     }
 
-    public synchronized boolean remove(String userId) throws IOException {
-        if (userId == null || userId.isBlank()) return false;
-        boolean removed = data.entries.removeIf(e -> userId.equals(e.userId()));
+    public synchronized boolean add(String userId, String displayName) throws IOException {
+        if ((userId == null || userId.isBlank()) && (displayName == null || displayName.isBlank())) return false;
+        for (WhitelistEntry entry : data.entries) {
+            if (userId != null && !userId.isBlank() && entry.userId() != null && userId.equals(entry.userId())) {
+                return false;
+            }
+            if (displayName != null && !displayName.isBlank() && entry.displayName() != null && entry.displayName().trim().equalsIgnoreCase(displayName.trim())) {
+                return false;
+            }
+        }
+        data.entries.add(new WhitelistEntry(userId, displayName != null ? displayName.trim() : null, Instant.now().toString()));
+        save();
+        return true;
+    }
+
+    public synchronized boolean remove(String target) throws IOException {
+        if (target == null || target.isBlank()) return false;
+        String clean = target.trim();
+        boolean removed = data.entries.removeIf(e ->
+            (e.displayName() != null && e.displayName().trim().equalsIgnoreCase(clean)) ||
+            (e.userId() != null && e.userId().equals(clean))
+        );
         if (removed) {
             save();
         }
