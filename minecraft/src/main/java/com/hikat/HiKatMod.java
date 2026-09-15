@@ -75,7 +75,8 @@ public class HiKatMod {
                             clientSnapshot.fingerprint()
                         ));
                     } catch (Exception e) {
-                        context.disconnect(Component.literal("HiKAT Authentication Error: " + e.getMessage()));
+                        System.err.println("[HiKAT] Authentication error loading session: " + e.getMessage());
+                        context.disconnect(Component.translatable("disconnect.hikat.auth_failed"));
                     }
                 });
             }
@@ -124,18 +125,20 @@ public class HiKatMod {
                     .then(Commands.literal("on").executes(ctx -> {
                         try {
                             connectionGate.getWhitelist().setEnabled(true);
-                            ctx.getSource().sendSuccess(() -> Component.literal("HiKAT whitelist ENABLED"), true);
+                            ctx.getSource().sendSuccess(() -> Component.translatable("command.hikat.whitelist.enabled"), true);
                         } catch (IOException e) {
-                            ctx.getSource().sendFailure(Component.literal("Failed to enable whitelist: " + e.getMessage()));
+                            System.err.println("[HiKAT] Failed to enable whitelist: " + e.getMessage());
+                            ctx.getSource().sendFailure(Component.translatable("command.hikat.whitelist.save_error"));
                         }
                         return 1;
                     }))
                     .then(Commands.literal("off").executes(ctx -> {
                         try {
                             connectionGate.getWhitelist().setEnabled(false);
-                            ctx.getSource().sendSuccess(() -> Component.literal("HiKAT whitelist DISABLED"), true);
+                            ctx.getSource().sendSuccess(() -> Component.translatable("command.hikat.whitelist.disabled"), true);
                         } catch (IOException e) {
-                            ctx.getSource().sendFailure(Component.literal("Failed to disable whitelist: " + e.getMessage()));
+                            System.err.println("[HiKAT] Failed to disable whitelist: " + e.getMessage());
+                            ctx.getSource().sendFailure(Component.translatable("command.hikat.whitelist.save_error"));
                         }
                         return 1;
                     }))
@@ -146,12 +149,13 @@ public class HiKatMod {
                                 try {
                                     boolean added = connectionGate.getWhitelist().add(displayName);
                                     if (added) {
-                                        ctx.getSource().sendSuccess(() -> Component.literal("Added " + displayName + " to HiKAT whitelist"), true);
+                                        ctx.getSource().sendSuccess(() -> Component.translatable("command.hikat.whitelist.added", displayName), true);
                                     } else {
-                                        ctx.getSource().sendFailure(Component.literal("Player " + displayName + " already in whitelist"));
+                                        ctx.getSource().sendFailure(Component.translatable("command.hikat.whitelist.already_added", displayName));
                                     }
                                 } catch (IOException e) {
-                                    ctx.getSource().sendFailure(Component.literal("Error saving whitelist: " + e.getMessage()));
+                                    System.err.println("[HiKAT] Error saving whitelist: " + e.getMessage());
+                                    ctx.getSource().sendFailure(Component.translatable("command.hikat.whitelist.save_error"));
                                 }
                                 return 1;
                             })
@@ -164,12 +168,13 @@ public class HiKatMod {
                                 try {
                                     boolean removed = connectionGate.getWhitelist().remove(displayName);
                                     if (removed) {
-                                        ctx.getSource().sendSuccess(() -> Component.literal("Removed " + displayName + " from HiKAT whitelist"), true);
+                                        ctx.getSource().sendSuccess(() -> Component.translatable("command.hikat.whitelist.removed", displayName), true);
                                     } else {
-                                        ctx.getSource().sendFailure(Component.literal("Player " + displayName + " not found in whitelist"));
+                                        ctx.getSource().sendFailure(Component.translatable("command.hikat.whitelist.not_found", displayName));
                                     }
                                 } catch (IOException e) {
-                                    ctx.getSource().sendFailure(Component.literal("Error saving whitelist: " + e.getMessage()));
+                                    System.err.println("[HiKAT] Error saving whitelist: " + e.getMessage());
+                                    ctx.getSource().sendFailure(Component.translatable("command.hikat.whitelist.save_error"));
                                 }
                                 return 1;
                             })
@@ -178,14 +183,25 @@ public class HiKatMod {
                     .then(Commands.literal("list").executes(ctx -> {
                         var entries = connectionGate.getWhitelist().getEntries();
                         boolean enabled = connectionGate.getWhitelist().isEnabled();
-                        ctx.getSource().sendSuccess(() -> Component.literal("HiKAT Whitelist (enabled: " + enabled + ", total: " + entries.size() + "):"), false);
+                        ctx.getSource().sendSuccess(() -> Component.translatable(
+                            enabled ? "command.hikat.whitelist.list.status_on" : "command.hikat.whitelist.list.status_off"
+                        ), false);
+
+                        java.util.List<String> visibleNames = new java.util.ArrayList<>();
                         for (var entry : entries) {
-                            String label = entry.displayName() != null ? entry.displayName() : entry.userId();
-                            if (entry.userId() != null && entry.displayName() != null) {
-                                label = entry.displayName() + " [" + entry.userId() + "]";
+                            if (entry.displayName() != null && !entry.displayName().isBlank()) {
+                                visibleNames.add(entry.displayName());
                             }
-                            final String finalLabel = label;
-                            ctx.getSource().sendSuccess(() -> Component.literal(" - " + finalLabel + " (added: " + entry.addedAt() + ")"), false);
+                        }
+
+                        ctx.getSource().sendSuccess(() -> Component.translatable(
+                            "command.hikat.whitelist.list.count", visibleNames.size()
+                        ), false);
+
+                        for (String name : visibleNames) {
+                            ctx.getSource().sendSuccess(() -> Component.translatable(
+                                "command.hikat.whitelist.list.entry", name
+                            ), false);
                         }
                         return entries.size();
                     }))
@@ -193,7 +209,7 @@ public class HiKatMod {
                 .then(Commands.literal("reload").executes(ctx -> {
                     connectionGate.getWhitelist().load();
                     connectionGate.getTokenVerifier().refreshJwks();
-                    ctx.getSource().sendSuccess(() -> Component.literal("HiKAT server configuration reloaded"), true);
+                    ctx.getSource().sendSuccess(() -> Component.translatable("command.hikat.reload.success"), true);
                     return 1;
                 }))
         );

@@ -1,0 +1,20 @@
+{
+  "disconnect.hikat.auth_failed": "O HiKAT não conseguiu verificar sua sessão. Abra o jogo novamente pelo HiKAT Launcher.",
+  "disconnect.hikat.whitelist": "Você não está na lista de jogadores permitidos deste servidor.",
+  "disconnect.hikat.integrity_failed": "Os arquivos do seu jogo não correspondem aos do servidor. Repare ou atualize o jogo pelo HiKAT Launcher.",
+  "disconnect.hikat.file_modified": "Um arquivo protegido do jogo foi modificado. Repare o jogo pelo HiKAT Launcher antes de entrar novamente.",
+  "disconnect.hikat.server_error": "O servidor não conseguiu verificar sua conexão com o HiKAT. Tente novamente.",
+
+  "command.hikat.whitelist.enabled": "Lista de permissões do HiKAT ativada.",
+  "command.hikat.whitelist.disabled": "Lista de permissões do HiKAT desativada.",
+  "command.hikat.whitelist.added": "%s foi adicionado à lista de permissões do HiKAT.",
+  "command.hikat.whitelist.already_added": "O jogador %s já está na lista de permissões.",
+  "command.hikat.whitelist.removed": "%s foi removido da lista de permissões do HiKAT.",
+  "command.hikat.whitelist.not_found": "O jogador %s não foi encontrado na lista de permissões.",
+  "command.hikat.whitelist.save_error": "Erro ao salvar a lista de permissões.",
+  "command.hikat.whitelist.list.status_on": "Lista de permissões do HiKAT: ativada",
+  "command.hikat.whitelist.list.status_off": "Lista de permissões do HiKAT: desativada",
+  "command.hikat.whitelist.list.count": "Jogadores: %s",
+  "command.hikat.whitelist.list.entry": "- %s",
+  "command.hikat.reload.success": "Configuração do servidor HiKAT recarregada."
+}
