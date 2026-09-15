@@ -200,15 +200,17 @@ export default function ServerConsoleView({
         style={{
           flex: 1,
           borderRadius: 16,
-          background: isDark ? "#0b1116" : "#0f172a",
-          border: `1px solid ${isDark ? "rgba(62, 196, 192, 0.2)" : "rgba(0, 0, 0, 0.2)"}`,
+          background: isDark ? "#0b1116" : "#ffffff",
+          border: `1px solid ${
+            isDark ? "rgba(62, 196, 192, 0.2)" : tokens.borderMedium
+          }`,
           boxShadow: tokens.cardShadow,
           padding: "16px 20px",
           overflowY: "auto",
           fontFamily: "'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
           fontSize: "0.875rem",
           lineHeight: 1.6,
-          color: "#e2e8f0",
+          color: isDark ? "#e2e8f0" : "#1e293b",
           position: "relative",
           userSelect: "text",
         }}
@@ -224,7 +226,7 @@ export default function ServerConsoleView({
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              color: "rgba(255, 255, 255, 0.35)",
+              color: isDark ? "rgba(255, 255, 255, 0.35)" : tokens.textMuted,
               gap: 8,
               textAlign: "center",
               userSelect: "none",
@@ -249,10 +251,10 @@ export default function ServerConsoleView({
                   wordBreak: "break-word",
                   whiteSpace: "pre-wrap",
                   color: isEcho
-                    ? "#3ec4c0"
-                    : log.type === "error"
-                    ? "#f87171"
-                    : "#cbd5e1",
+                    ? isDark ? "#3ec4c0" : "#0c6e6b"
+                    : log.type === "error" || log.type === "stderr"
+                    ? isDark ? "#f87171" : "#dc2626"
+                    : isDark ? "#cbd5e1" : "#1e293b",
                   fontWeight: isEcho ? 600 : 400,
                   marginBottom: 2,
                 }}
@@ -278,13 +280,15 @@ export default function ServerConsoleView({
               gap: 6,
               padding: "6px 14px",
               borderRadius: 999,
-              background: "rgba(62, 196, 192, 0.9)",
-              color: "#0a0e14",
+              background: isDark ? "rgba(62, 196, 192, 0.9)" : "#0c6e6b",
+              color: isDark ? "#0a0e14" : "#ffffff",
               fontWeight: 700,
               fontSize: "0.775rem",
               border: "none",
               cursor: "pointer",
-              boxShadow: "0 4px 14px rgba(62, 196, 192, 0.4)",
+              boxShadow: isDark
+                ? "0 4px 14px rgba(62, 196, 192, 0.4)"
+                : "0 4px 14px rgba(12, 110, 107, 0.3)",
               zIndex: 10,
             }}
           >
@@ -315,7 +319,7 @@ export default function ServerConsoleView({
             style={{
               position: "absolute",
               left: 16,
-              color: "#3ec4c0",
+              color: isDark ? "#3ec4c0" : "#0c6e6b",
               fontWeight: 700,
               fontFamily: "monospace",
               fontSize: "1.1rem",

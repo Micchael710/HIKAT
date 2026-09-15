@@ -758,7 +758,7 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
                   display: "grid",
                   gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
                   gap: 16,
-                  alignItems: "start",
+                  alignItems: "stretch",
                 }}
               >
                 {/* Live Console Card */}
@@ -773,6 +773,8 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
                     gap: 14,
                     boxShadow: tokens.cardShadow,
                     boxSizing: "border-box",
+                    minHeight: 360,
+                    height: 360,
                   }}
                 >
                   <div
@@ -813,7 +815,9 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
                             width: 6,
                             height: 6,
                             borderRadius: "50%",
-                            background: isConsoleConnected ? "#4ade80" : "#94a3b8",
+                            background: isConsoleConnected
+                              ? isDark ? "#4ade80" : "#16a34a"
+                              : isDark ? "#94a3b8" : "#94a3b8",
                           }}
                         />
                         {isConsoleConnected ? "Conectada" : "En espera"}
@@ -840,15 +844,16 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
                     style={{
                       padding: "14px 16px",
                       borderRadius: 12,
-                      background: isDark ? "#0b1116" : "#0f172a",
+                      background: isDark ? "#0b1116" : "#f8fafc",
                       border: `1px solid ${
-                        isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.2)"
+                        isDark ? "rgba(255, 255, 255, 0.08)" : tokens.borderMedium
                       }`,
                       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
                       fontSize: "0.8rem",
                       lineHeight: 1.5,
-                      color: "#e2e8f0",
-                      height: 180,
+                      color: isDark ? "#e2e8f0" : "#1e293b",
+                      flex: 1,
+                      minHeight: 0,
                       overflowY: "auto",
                       display: "flex",
                       flexDirection: "column",
@@ -862,7 +867,7 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
                           alignItems: "center",
                           justifyContent: "center",
                           height: "100%",
-                          color: "rgba(255, 255, 255, 0.35)",
+                          color: isDark ? "rgba(255, 255, 255, 0.35)" : tokens.textMuted,
                           fontSize: "0.85rem",
                         }}
                       >
@@ -871,18 +876,26 @@ export default function ServerOverviewView({ theme, serverId, onNavigate }: Serv
                           : "Esperando registros de consola..."}
                       </div>
                     ) : (
-                      liveLogs.map((log) => (
-                        <div
-                          key={log.id}
-                          style={{
-                            whiteSpace: "pre-wrap",
-                            wordBreak: "break-all",
-                            color: log.type === "stderr" ? "#f87171" : "#cbd5e1",
-                          }}
-                        >
-                          {log.line}
-                        </div>
-                      ))
+                      liveLogs.map((log) => {
+                        const isEcho = log.line.startsWith(">")
+                        return (
+                          <div
+                            key={log.id}
+                            style={{
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "break-all",
+                              color: isEcho
+                                ? isDark ? "#3ec4c0" : "#0c6e6b"
+                                : log.type === "stderr" || log.type === "error"
+                                ? isDark ? "#f87171" : "#dc2626"
+                                : isDark ? "#cbd5e1" : "#1e293b",
+                              fontWeight: isEcho ? 600 : 400,
+                            }}
+                          >
+                            {log.line}
+                          </div>
+                        )
+                      })
                     )}
                   </div>
                 </div>
