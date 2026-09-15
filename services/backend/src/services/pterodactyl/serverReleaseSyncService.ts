@@ -399,12 +399,7 @@ export async function syncServerIntegrityJson(
   if (typeof client.createFolder === "function") {
     await client.createFolder("/", "hikat").catch(() => {})
   }
-  if (typeof client.renameFile === "function") {
-    await client.writeFile("/hikat/integrity.tmp", integrityPayload)
-    await client.renameFile("/hikat", "integrity.tmp", "integrity.json")
-  } else if (typeof client.writeFile === "function") {
-    await client.writeFile("/hikat/integrity.json", integrityPayload)
-  }
+  await client.writeFile("/hikat/integrity.json", integrityPayload)
 
   return {
     rollback: async () => {

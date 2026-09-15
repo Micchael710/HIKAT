@@ -1846,7 +1846,9 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
       const { rollback } = await syncServerIntegrityJson(db, env, draft.id, null, mockClient as any)
       expect(typeof rollback).toBe("function")
 
-      // Verify integrity.json was written to Wings
+      // Verify integrity.json was written to Wings directly without renameFile
+      expect(mockClient.writeFile).toHaveBeenCalledWith("/hikat/integrity.json", expect.any(String))
+      expect(mockClient.renameFile).not.toHaveBeenCalled()
       const writtenJson = filesOnWings.get("/hikat/integrity.json")
       expect(writtenJson).toBeDefined()
       const parsed = JSON.parse(writtenJson!)
@@ -1855,7 +1857,7 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
       expect(parsed.expectedFingerprint.length).toBe(64)
     })
 
-    it("restores previous integrity.json on fail-safe rollback if activation fails", async () => {
+    it("restores previous integrity.json on fail-safe rollback if activation fails (directly overwriting without renameFile)", async () => {
       const filesOnWings = new Map<string, string>()
       filesOnWings.set("/hikat/integrity.json", JSON.stringify({ releaseId: "rel-old", expectedFingerprint: "old-fingerprint" }))
 
@@ -1864,14 +1866,8 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
         writeFile: vi.fn().mockImplementation(async (path: string, content: string) => {
           filesOnWings.set(path, content)
         }),
-        renameFile: vi.fn().mockImplementation(async (root: string, from: string, to: string) => {
-          const fromPath = `${root}/${from}`.replace("//", "/")
-          const toPath = `${root}/${to}`.replace("//", "/")
-          const data = filesOnWings.get(fromPath)
-          if (data) {
-            filesOnWings.delete(fromPath)
-            filesOnWings.set(toPath, data)
-          }
+        renameFile: vi.fn().mockImplementation(async () => {
+          throw new Error("renameFile should not be called")
         }),
         getFileContents: vi.fn().mockImplementation(async (path: string) => {
           const val = filesOnWings.get(path)
@@ -1882,6 +1878,10 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
 
       const draft = await prepareGameDraft(db, "admin-1", null, env)
       const { rollback } = await syncServerIntegrityJson(db, env, draft.id, null, mockClient as any)
+
+      // Verify writeFile was called directly for /hikat/integrity.json and renameFile was NOT called
+      expect(mockClient.writeFile).toHaveBeenCalledWith("/hikat/integrity.json", expect.any(String))
+      expect(mockClient.renameFile).not.toHaveBeenCalled()
 
       // Verify new integrity.json is written
       const newlyWritten = JSON.parse(filesOnWings.get("/hikat/integrity.json")!)
@@ -1894,6 +1894,49 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
       const restored = JSON.parse(filesOnWings.get("/hikat/integrity.json")!)
       expect(restored.releaseId).toBe("rel-old")
       expect(restored.expectedFingerprint).toBe("old-fingerprint")
+    })
+
+    it("publishGameRelease directly overwrites existing integrity.json with writeFile, never calls renameFile, and restores on failure", async () => {
+      const filesOnWings = new Map<string, string>()
+      const oldPayload = JSON.stringify({ releaseId: "rel-prev", expectedFingerprint: "prev-fingerprint" })
+      filesOnWings.set("/hikat/integrity.json", oldPayload)
+
+      const mockClient = {
+        createFolder: vi.fn().mockResolvedValue(undefined),
+        writeFile: vi.fn().mockImplementation(async (path: string, content: string) => {
+          filesOnWings.set(path, content)
+        }),
+        renameFile: vi.fn().mockImplementation(async () => {
+          throw new Error("renameFile should not be called")
+        }),
+        getFileContents: vi.fn().mockImplementation(async (path: string) => {
+          const val = filesOnWings.get(path)
+          if (!val) throw new Error("404")
+          return val
+        }),
+      }
+
+      // Prepare draft first
+      await prepareGameDraft(db, "admin-1", null, env)
+
+      // Publish a new release with clientOverride
+      const published = await publishGameRelease(
+        db,
+        env,
+        { version: "2.0.0", notes: "New release with existing integrity.json" },
+        "admin-1",
+        undefined,
+        null,
+        mockClient as any,
+      )
+
+      expect(published).toBeDefined()
+      // Directly overwritten via writeFile, renameFile was NEVER called
+      expect(mockClient.writeFile).toHaveBeenCalledWith("/hikat/integrity.json", expect.any(String))
+      expect(mockClient.renameFile).not.toHaveBeenCalled()
+
+      const currentContent = JSON.parse(filesOnWings.get("/hikat/integrity.json")!)
+      expect(currentContent.releaseId).toBe(published.id)
     })
   })
 })
