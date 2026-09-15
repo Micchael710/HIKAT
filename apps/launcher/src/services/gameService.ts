@@ -353,6 +353,7 @@ export const gameService = {
           }
 
           return {
+            releaseId: modpack.releaseId || null,
             version: modpack.version,
             minecraftVersion: modpack.minecraftVersion,
             modLoader: modpack.modLoader || "NEOFORGE",
@@ -462,6 +463,7 @@ export const gameService = {
           )
 
           return {
+            releaseId: parsed.releaseId || null,
             version: parsed.version || "1.0.0",
             minecraftVersion: parsed.minecraftVersion || "1.21.1",
             modLoader: parsed.modLoader || "NEOFORGE",

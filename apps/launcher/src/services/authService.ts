@@ -924,7 +924,7 @@ class LauncherAuthService {
   }
 
   public async getGameToken(): Promise<string> {
-    const token = this.client.getAccessToken()
+    const token = await this.client.ensureValidAccessToken(60)
     if (!token) {
       throw new Error("No active session to obtain game token")
     }

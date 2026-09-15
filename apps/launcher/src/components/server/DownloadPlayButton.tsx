@@ -1798,19 +1798,24 @@ export default function DownloadPlayButton({
             .filter((f) => f.policy === "NO_MODIFICABLE")
             .map((f) => f.path)
           const releaseId = manifest.releaseId || manifest.version || ""
-          await gameService.writeGameSession({
+          const writeRes = await gameService.writeGameSession({
             gameToken,
             releaseId,
             protectedFiles,
             gameContext: effectiveGameContext,
           })
+          if (writeRes && (writeRes as any).success === false) {
+            throw new Error((writeRes as any).error || "No se pudo escribir la sesión de juego")
+          }
           gameService.startSessionRenewal({
             releaseId,
             protectedFiles,
             gameContext: effectiveGameContext,
           })
-        } catch (authErr) {
-          console.warn("Could not prepare game session:", authErr)
+        } catch (authErr: any) {
+          console.error("Could not prepare game session:", authErr)
+          showToast(authErr?.message || t("playButton.launchVerifyHint"), "error")
+          return
         }
       }
 

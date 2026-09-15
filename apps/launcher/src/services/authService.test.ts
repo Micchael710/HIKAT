@@ -1160,6 +1160,21 @@ describe("Launcher Authentication Service & API Client Suite (Shard 8F Auth Pari
     expect(cached?.username).toBe("")
     expect(cached?.suggestedUsername).toBe("OauthNew")
   })
+
+  it("26. getGameToken uses ensureValidAccessToken(60) and throws if token unavailable", async () => {
+    const ensureSpy = vi.spyOn((authService as any).client, "ensureValidAccessToken").mockResolvedValue(null)
+    await expect(authService.getGameToken()).rejects.toThrow("No active session to obtain game token")
+
+    ensureSpy.mockResolvedValue("valid-access-token-123")
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ gameToken: "jwt.game.token" }),
+    })
+
+    const token = await authService.getGameToken()
+    expect(token).toBe("jwt.game.token")
+    expect(ensureSpy).toHaveBeenCalledWith(60)
+  })
 })
 
 

@@ -1078,6 +1078,43 @@ describe("Shard 8E: Launcher GameService & Filesystem Authority Integration Suit
     expect(manifest?.installed).toBe(true)
     expect(manifest?.installedModpackVersion).toBe("1.0.0")
   })
+
+  it("28. checkGameManifest preserves releaseId in online result and cached fallback", async () => {
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: true,
+      data: {
+        publishedModpack: {
+          releaseId: "rel-online-123",
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.250",
+          clientFiles: [],
+        },
+      },
+    })
+
+    const onlineManifest = await gameService.checkGameManifest()
+    expect(onlineManifest?.releaseId).toBe("rel-online-123")
+
+    // Now test offline fallback
+    vi.spyOn(apiClientModule, "graphqlClient").mockResolvedValue({
+      success: false,
+      errorCode: "NETWORK_ERROR",
+      error: "Offline",
+    })
+    localStorage.setItem(
+      "hikat_game_manifest",
+      JSON.stringify({
+        releaseId: "rel-cached-456",
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        clientFiles: [],
+      }),
+    )
+
+    const cachedManifest = await gameService.checkGameManifest()
+    expect(cachedManifest?.releaseId).toBe("rel-cached-456")
+  })
 })
 
 

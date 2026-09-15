@@ -11,6 +11,7 @@ import DownloadPlayButton, {
 } from "./DownloadPlayButton"
 import { LanguageProvider } from "../../context/LanguageContext"
 import { gameService, GameManifest } from "../../services/gameService"
+import { authService } from "../../services/authService"
 import { STORAGE_KEYS, setStoredBoolean } from "../../utils/settingsStorage"
 
 describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical State Suite", () => {
@@ -62,6 +63,8 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       ],
     })
     vi.spyOn(gameService, "subscribeReleaseEvents").mockReturnValue(() => {})
+    vi.spyOn(authService, "getGameToken").mockResolvedValue("mock-game-token")
+    vi.spyOn(gameService, "writeGameSession").mockResolvedValue({ success: true } as any)
   })
 
   afterEach(() => {
@@ -1941,6 +1944,68 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       const toast = container.querySelector(".play-button-toast, .settings-live-toast")
       expect(toast).not.toBeNull()
       expect(toast?.textContent).toContain("No se pudo iniciar el juego, verifica los archivos e inténtalo de nuevo")
+    })
+
+    it("4b. When getGameToken fails, launchGame is NOT called, error toast is shown, and function returns", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [],
+      })
+      vi.spyOn(authService, "getGameToken").mockRejectedValue(new Error("Token expired"))
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      await act(async () => {
+        btn.click()
+      })
+
+      expect(launchSpy).not.toHaveBeenCalled()
+      const toast = container.querySelector(".play-button-toast, .settings-live-toast")
+      expect(toast).not.toBeNull()
+      expect(toast?.textContent).toContain("Token expired")
+    })
+
+    it("4c. When writeGameSession fails, launchGame is NOT called, error toast is shown, and function returns", async () => {
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [],
+      })
+      vi.spyOn(gameService, "writeGameSession").mockRejectedValue(new Error("Disk full"))
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      expect(btn.textContent).toContain("JUGAR")
+
+      await act(async () => {
+        btn.click()
+      })
+
+      expect(launchSpy).not.toHaveBeenCalled()
+      const toast = container.querySelector(".play-button-toast, .settings-live-toast")
+      expect(toast).not.toBeNull()
+      expect(toast?.textContent).toContain("Disk full")
     })
 
     it("5. Filesystem integrity watcher event sets integrity lock silently without toast or changing button text", async () => {
