@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -193,6 +194,22 @@ func TestBuildLoginDisconnectLegacyJSON(t *testing.T) {
 	expectedJSON := `{"text":"` + msg + `"}`
 	if string(jsonBytes) != expectedJSON {
 		t.Errorf("Expected JSON %q, got %q", expectedJSON, string(jsonBytes))
+	}
+
+	// Validate JSON contains no extra backslashes
+	if strings.Contains(string(jsonBytes), `\`) {
+		t.Errorf("Expected clean JSON without backslashes, got %s", string(jsonBytes))
+	}
+
+	// Validate it unmarshals into standard Chat component
+	var parsed struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(jsonBytes, &parsed); err != nil {
+		t.Fatalf("Failed to parse JSON disconnect message: %v", err)
+	}
+	if parsed.Text != msg {
+		t.Errorf("Expected parsed text %q, got %q", msg, parsed.Text)
 	}
 }
 

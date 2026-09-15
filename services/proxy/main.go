@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -76,13 +77,15 @@ func main() {
 	// Global connection limit semaphore
 	sem := make(chan struct{}, cfg.MaxConnections)
 
-	// Graceful shutdown channel
+	// Graceful shutdown channels
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
 
 	go func() {
 		<-stopChan
 		log.Println("[Proxy] Shutting down listener...")
+		close(done)
 		listener.Close()
 	}()
 
@@ -90,10 +93,14 @@ func main() {
 		clientConn, err := listener.Accept()
 		if err != nil {
 			select {
-			case <-stopChan:
+			case <-done:
 				log.Println("[Proxy] Listener stopped cleanly")
 				return
 			default:
+				if errors.Is(err, net.ErrClosed) {
+					log.Println("[Proxy] Listener closed, exiting accept loop cleanly")
+					return
+				}
 				log.Printf("[Proxy] Accept error: %v", err)
 				continue
 			}

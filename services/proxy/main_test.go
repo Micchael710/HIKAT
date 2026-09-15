@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -348,5 +349,44 @@ func TestFlowLoginUnavailable(t *testing.T) {
 
 	if !strings.Contains(string(buf[:n]), "El servidor no está disponible en este momento") {
 		t.Errorf("Expected unavailable message, got %q", string(buf[:n]))
+	}
+}
+
+func TestGracefulShutdown(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+
+	done := make(chan struct{})
+	loopExited := make(chan struct{})
+
+	go func() {
+		defer close(loopExited)
+		for {
+			_, err := listener.Accept()
+			if err != nil {
+				select {
+				case <-done:
+					return
+				default:
+					if errors.Is(err, net.ErrClosed) {
+						return
+					}
+					continue
+				}
+			}
+		}
+	}()
+
+	// Trigger shutdown
+	close(done)
+	listener.Close()
+
+	select {
+	case <-loopExited:
+		// Exited cleanly without hanging or infinite loop
+	case <-time.After(1 * time.Second):
+		t.Fatal("Accept loop did not exit promptly on shutdown")
 	}
 }
