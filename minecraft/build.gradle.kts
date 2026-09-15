@@ -45,8 +45,8 @@ repositories {
 }
 
 dependencies {
-    jarJar("com.nimbusds:nimbus-jose-jwt:9.40")
-    implementation("com.nimbusds:nimbus-jose-jwt:9.40")
+    jarJar("com.nimbusds:nimbus-jose-jwt:10.4.2")
+    implementation("com.nimbusds:nimbus-jose-jwt:10.4.2")
 
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")

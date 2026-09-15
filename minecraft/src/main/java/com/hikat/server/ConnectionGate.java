@@ -77,7 +77,7 @@ public class ConnectionGate {
 
             // 5. Complete Configuration Task strictly AFTER GameProfile mutation
             onTaskFinished.run();
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
             listener.disconnect(Component.literal("HiKAT Authentication Error: " + e.getMessage()));
         }
     }
