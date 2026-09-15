@@ -6,6 +6,7 @@ import ServerWhitelistCard from "./ServerWhitelistCard"
 import { serverWhitelistApi } from "../../services/graphqlClient"
 
 vi.mock("../../services/graphqlClient", () => ({
+  resolveMediaUrl: vi.fn((url?: string | null) => (url ? (url.startsWith("http") ? url : `http://127.0.0.1:8787${url}`) : "")),
   serverWhitelistApi: {
     getServerWhitelist: vi.fn(),
     setServerWhitelistEnabled: vi.fn(),
@@ -154,5 +155,36 @@ describe("ServerWhitelistCard Component", () => {
     fireEvent.mouseDown(candidateBtn)
 
     expect((input as HTMLInputElement).value).toBe("vBrayan06")
+  })
+
+  it("limits autocomplete suggestions to a maximum of 8 candidates", async () => {
+    vi.mocked(serverWhitelistApi.getServerWhitelist).mockResolvedValue({
+      enabled: true,
+      mode: "HIKAT",
+      entries: [],
+    })
+    const mockCandidates = Array.from({ length: 15 }, (_, i) => ({
+      displayName: `Player_${i + 1}`,
+      skinImageUrl: i % 2 === 0 ? `/media/skin_${i + 1}.png` : null,
+    }))
+    vi.mocked(serverWhitelistApi.getHikatWhitelistCandidates).mockResolvedValue(mockCandidates)
+
+    render(<ServerWhitelistCard theme="dark" serverId="srv-1" />)
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Nombre del jugador...")).toBeDefined()
+    })
+
+    const input = screen.getByPlaceholderText("Nombre del jugador...")
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: "Player_" } })
+
+    await waitFor(() => {
+      const dropdown = screen.getByTestId("candidates-dropdown")
+      expect(dropdown).toBeDefined()
+      // Exactly 8 suggestion buttons should be rendered
+      const buttons = dropdown.querySelectorAll("button")
+      expect(buttons.length).toBe(8)
+    })
   })
 })

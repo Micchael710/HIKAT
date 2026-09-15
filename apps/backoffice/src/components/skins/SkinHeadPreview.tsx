@@ -3,7 +3,7 @@ import { resolveMediaUrl } from "../../services/graphqlClient"
 import { IconShirt } from "../../theme/icons"
 
 interface SkinHeadPreviewProps {
-  imageUrl: string
+  imageUrl?: string | null
   size?: number
   className?: string
 }

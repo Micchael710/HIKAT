@@ -3,79 +3,12 @@ import type { ThemeMode, ServerWhitelist, HikatWhitelistCandidate } from "../../
 import { serverWhitelistApi } from "../../services/graphqlClient"
 import { getThemeTokens } from "../../theme/tokens"
 import { IconShieldCheck, IconTrash, IconSpinner, IconRefresh } from "../../theme/icons"
+import SkinHeadPreview from "../skins/SkinHeadPreview"
 
 interface ServerWhitelistCardProps {
   theme: ThemeMode
   serverId: string
   onToast?: (msg: string, type?: "success" | "error") => void
-}
-
-function PlayerAvatar({
-  displayName,
-  skinImageUrl,
-  size = 24,
-}: {
-  displayName: string
-  skinImageUrl?: string | null
-  size?: number
-}) {
-  const [imgError, setImgError] = useState(false)
-
-  if (skinImageUrl && !imgError) {
-    // Standard Minecraft skin: 64x64 texture.
-    // The head front face is an 8x8 region starting at x=8, y=8.
-    const totalImgSize = size * 8
-    const offset = -size
-
-    return (
-      <div
-        style={{
-          width: size,
-          height: size,
-          overflow: "hidden",
-          borderRadius: 4,
-          flexShrink: 0,
-          position: "relative",
-          backgroundColor: "#2a2a2a",
-        }}
-      >
-        <img
-          src={skinImageUrl}
-          alt={displayName}
-          onError={() => setImgError(true)}
-          style={{
-            width: totalImgSize,
-            height: totalImgSize,
-            marginLeft: offset,
-            marginTop: offset,
-            imageRendering: "pixelated",
-            display: "block",
-          }}
-        />
-      </div>
-    )
-  }
-
-  return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: 4,
-        flexShrink: 0,
-        backgroundColor: "rgba(62, 196, 192, 0.15)",
-        color: "#3ec4c0",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: Math.max(10, Math.floor(size * 0.45)),
-        fontWeight: 700,
-        userSelect: "none",
-      }}
-    >
-      {displayName.slice(0, 2).toUpperCase()}
-    </div>
-  )
 }
 
 export default function ServerWhitelistCard({
@@ -368,7 +301,7 @@ export default function ServerWhitelistCard({
               }}
               className="custom-scroll"
             >
-              {filteredCandidates.slice(0, 10).map((c) => (
+              {filteredCandidates.slice(0, 8).map((c) => (
                 <button
                   key={c.displayName}
                   type="button"
@@ -401,7 +334,7 @@ export default function ServerWhitelistCard({
                     e.currentTarget.style.backgroundColor = "transparent"
                   }}
                 >
-                  <PlayerAvatar displayName={c.displayName} skinImageUrl={c.skinImageUrl} size={22} />
+                  <SkinHeadPreview imageUrl={c.skinImageUrl} size={22} />
                   <span style={{ fontWeight: 500 }}>{c.displayName}</span>
                 </button>
               ))}
@@ -484,9 +417,8 @@ export default function ServerWhitelistCard({
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   {whitelist.mode === "HIKAT" && (
-                    <PlayerAvatar
-                      displayName={entry.name}
-                      skinImageUrl={matchedCandidate?.skinImageUrl}
+                    <SkinHeadPreview
+                      imageUrl={matchedCandidate?.skinImageUrl}
                       size={22}
                     />
                   )}
