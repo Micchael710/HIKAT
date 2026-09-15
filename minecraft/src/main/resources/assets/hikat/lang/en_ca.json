@@ -1,0 +1,20 @@
+{
+  "disconnect.hikat.auth_failed": "HiKAT could not verify your session. Please launch the game again from HiKAT Launcher.",
+  "disconnect.hikat.whitelist": "You are not allowed to join this server.",
+  "disconnect.hikat.integrity_failed": "Your game files do not match this server. Repair or update the game from HiKAT Launcher.",
+  "disconnect.hikat.file_modified": "A protected game file was changed. Repair the game from HiKAT Launcher before reconnecting.",
+  "disconnect.hikat.server_error": "The server could not verify your HiKAT connection. Please try again.",
+
+  "command.hikat.whitelist.enabled": "HiKAT whitelist enabled.",
+  "command.hikat.whitelist.disabled": "HiKAT whitelist disabled.",
+  "command.hikat.whitelist.added": "Added %s to the HiKAT whitelist.",
+  "command.hikat.whitelist.already_added": "Player %s is already in the whitelist.",
+  "command.hikat.whitelist.removed": "Removed %s from the HiKAT whitelist.",
+  "command.hikat.whitelist.not_found": "Player %s was not found in the whitelist.",
+  "command.hikat.whitelist.save_error": "Could not save the whitelist.",
+  "command.hikat.whitelist.list.status_on": "HiKAT whitelist: enabled",
+  "command.hikat.whitelist.list.status_off": "HiKAT whitelist: disabled",
+  "command.hikat.whitelist.list.count": "Players: %s",
+  "command.hikat.whitelist.list.entry": "- %s",
+  "command.hikat.reload.success": "HiKAT server configuration reloaded."
+}

@@ -34,7 +34,16 @@ public class TranslationAssetsTest {
         "command.hikat.reload.success"
     );
 
-    private static final List<String> LOCALES = List.of("en_us", "es_es", "pt_br", "fr_fr");
+    private static final List<String> LOCALES = List.of(
+        // English
+        "en_us", "en_gb", "en_au", "en_ca", "en_nz", "en_za",
+        // Spanish
+        "es_es", "es_ar", "es_cl", "es_ec", "es_mx", "es_uy", "es_ve",
+        // Portuguese
+        "pt_br", "pt_pt",
+        // French
+        "fr_fr", "fr_ca"
+    );
     private static final Pattern ENTRY_PATTERN = Pattern.compile("\"([a-zA-Z0-9._]+)\"\\s*:\\s*\"([^\"]*)\"");
 
     @Test
@@ -50,6 +59,9 @@ public class TranslationAssetsTest {
             while (matcher.find()) {
                 translations.put(matcher.group(1), matcher.group(2));
             }
+
+            assertEquals(REQUIRED_KEYS, translations.keySet(),
+                "Keys in " + locale + " must match REQUIRED_KEYS exactly without missing or extraneous keys");
 
             for (String requiredKey : REQUIRED_KEYS) {
                 assertTrue(translations.containsKey(requiredKey),
