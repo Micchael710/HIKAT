@@ -1799,14 +1799,25 @@ export default function DownloadPlayButton({
 
       try {
         const gameToken = await authService.getGameToken()
-        const protectedFiles = (playManifest.clientFiles || [])
+        const clientFiles = playManifest.clientFiles || []
+        const protectedFiles = clientFiles
           .filter((f) => f.policy === "NO_MODIFICABLE")
           .map((f) => f.path)
+        const filePolicies = clientFiles.map((f) => ({
+          path: f.path,
+          policy: f.policy || "MODIFICABLE",
+        }))
+        const directoryPolicies = (playManifest.directoryPolicies || []).map((d) => ({
+          path: d.path,
+          policy: d.policy,
+        }))
         const releaseId = playManifest.releaseId || playManifest.version || ""
         const writeRes = await gameService.writeGameSession({
           gameToken,
           releaseId,
           protectedFiles,
+          filePolicies,
+          directoryPolicies,
           gameContext: effectiveGameContext,
         })
         if (writeRes && (writeRes as any).success === false) {
@@ -1815,6 +1826,8 @@ export default function DownloadPlayButton({
         gameService.startSessionRenewal({
           releaseId,
           protectedFiles,
+          filePolicies,
+          directoryPolicies,
           gameContext: effectiveGameContext,
         })
       } catch (authErr: any) {

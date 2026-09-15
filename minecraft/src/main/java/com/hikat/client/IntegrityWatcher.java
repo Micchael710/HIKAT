@@ -1,6 +1,7 @@
 package com.hikat.client;
 
 import com.hikat.common.FingerprintUtil;
+import com.hikat.common.SessionData;
 import java.io.IOException;
 import java.nio.file.ClosedWatchServiceException;
 import java.nio.file.FileSystems;
@@ -19,8 +20,11 @@ import java.util.function.Consumer;
 
 public class IntegrityWatcher {
     private final Path gameRoot;
+    private final SessionData sessionData;
+    private final Set<String> officialProtected;
     private final Map<String, String> currentHashes;
     private final String initialFingerprint;
+    private String lastReportedFingerprint;
     private final Consumer<String> onFingerprintChanged;
 
     private WatchService watchService;
@@ -30,14 +34,46 @@ public class IntegrityWatcher {
 
     public IntegrityWatcher(
         Path gameRoot,
+        SessionData sessionData,
         Map<String, String> initialHashes,
         String initialFingerprint,
         Consumer<String> onFingerprintChanged
     ) {
         this.gameRoot = gameRoot;
+        this.sessionData = sessionData;
         this.currentHashes = new HashMap<>(initialHashes);
         this.initialFingerprint = initialFingerprint;
+        this.lastReportedFingerprint = initialFingerprint;
         this.onFingerprintChanged = onFingerprintChanged;
+
+        this.officialProtected = new HashSet<>();
+        if (sessionData != null) {
+            if (sessionData.protectedFiles() != null) {
+                for (String p : sessionData.protectedFiles()) {
+                    if (p != null && !p.isBlank()) {
+                        officialProtected.add(FingerprintUtil.normalizePath(p));
+                    }
+                }
+            }
+            if (sessionData.filePolicies() != null) {
+                for (SessionData.PolicyEntry fp : sessionData.filePolicies()) {
+                    if (fp != null && fp.path() != null && "NO_MODIFICABLE".equalsIgnoreCase(fp.policy())) {
+                        officialProtected.add(FingerprintUtil.normalizePath(fp.path()));
+                    }
+                }
+            }
+        } else {
+            this.officialProtected.addAll(initialHashes.keySet());
+        }
+    }
+
+    public IntegrityWatcher(
+        Path gameRoot,
+        Map<String, String> initialHashes,
+        String initialFingerprint,
+        Consumer<String> onFingerprintChanged
+    ) {
+        this(gameRoot, null, initialHashes, initialFingerprint, onFingerprintChanged);
     }
 
     public synchronized void start() throws IOException {
@@ -45,16 +81,41 @@ public class IntegrityWatcher {
         this.watchService = FileSystems.getDefault().newWatchService();
         this.running = true;
 
-        Set<Path> parentDirs = new HashSet<>();
-        for (String relPath : currentHashes.keySet()) {
+        Set<Path> dirsToWatch = new HashSet<>();
+        for (String relPath : officialProtected) {
             Path target = gameRoot.resolve(relPath);
             Path parent = target.getParent();
             if (parent != null && Files.exists(parent)) {
-                parentDirs.add(parent);
+                dirsToWatch.add(parent);
             }
         }
 
-        for (Path dir : parentDirs) {
+        if (sessionData != null && sessionData.directoryPolicies() != null) {
+            for (SessionData.PolicyEntry dp : sessionData.directoryPolicies()) {
+                if (dp == null || dp.path() == null) continue;
+                String dirNorm = FingerprintUtil.normalizePath(dp.path());
+                Path dir = dirNorm.isEmpty() ? gameRoot : gameRoot.resolve(dirNorm);
+                if (Files.exists(dir) && Files.isDirectory(dir)) {
+                    dirsToWatch.add(dir);
+                    try (var stream = Files.walk(dir)) {
+                        stream.filter(Files::isDirectory).forEach(dirsToWatch::add);
+                    } catch (IOException ignored) {}
+                }
+            }
+        }
+
+        for (Path dir : dirsToWatch) {
+            registerDirectory(dir);
+        }
+
+        watcherThread = new Thread(this::runWatcherLoop, "HiKAT-IntegrityWatcher");
+        watcherThread.setDaemon(true);
+        watcherThread.start();
+    }
+
+    private synchronized void registerDirectory(Path dir) {
+        if (!running || watchService == null || !Files.isDirectory(dir)) return;
+        try {
             WatchKey key = dir.register(
                 watchService,
                 StandardWatchEventKinds.ENTRY_CREATE,
@@ -62,11 +123,7 @@ public class IntegrityWatcher {
                 StandardWatchEventKinds.ENTRY_DELETE
             );
             keyPathMap.put(key, dir);
-        }
-
-        watcherThread = new Thread(this::runWatcherLoop, "HiKAT-IntegrityWatcher");
-        watcherThread.setDaemon(true);
-        watcherThread.start();
+        } catch (IOException ignored) {}
     }
 
     private void runWatcherLoop() {
@@ -85,7 +142,7 @@ public class IntegrityWatcher {
             }
 
             boolean hasOverflow = false;
-            Set<Path> changedFiles = new HashSet<>();
+            Set<Path> changedPaths = new HashSet<>();
 
             for (WatchEvent<?> event : key.pollEvents()) {
                 if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
@@ -96,7 +153,16 @@ public class IntegrityWatcher {
                 @SuppressWarnings("unchecked")
                 WatchEvent<Path> ev = (WatchEvent<Path>) event;
                 Path filename = ev.context();
-                changedFiles.add(dir.resolve(filename));
+                Path fullPath = dir.resolve(filename);
+                changedPaths.add(fullPath);
+
+                // Register any new subdirectories
+                if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE && Files.isDirectory(fullPath)) {
+                    registerDirectory(fullPath);
+                    try (var stream = Files.walk(fullPath)) {
+                        stream.filter(Files::isDirectory).forEach(this::registerDirectory);
+                    } catch (IOException ignored) {}
+                }
             }
 
             boolean valid = key.reset();
@@ -104,7 +170,7 @@ public class IntegrityWatcher {
                 keyPathMap.remove(key);
             }
 
-            if (!changedFiles.isEmpty() || hasOverflow) {
+            if (!changedPaths.isEmpty() || hasOverflow) {
                 try {
                     Thread.sleep(400); // 400ms debounce
                 } catch (InterruptedException e) {
@@ -115,13 +181,20 @@ public class IntegrityWatcher {
                     if (hasOverflow) {
                         rescanAll();
                     } else {
-                        for (Path changed : changedFiles) {
-                            rehashFile(changed);
+                        for (Path changed : changedPaths) {
+                            if (Files.isDirectory(changed)) {
+                                try (var stream = Files.walk(changed)) {
+                                    stream.filter(Files::isRegularFile).forEach(this::rehashFile);
+                                } catch (IOException ignored) {}
+                            } else {
+                                rehashFile(changed);
+                            }
                         }
                     }
 
                     String newFingerprint = FingerprintUtil.computeCanonicalFingerprint(currentHashes);
-                    if (!newFingerprint.equals(initialFingerprint)) {
+                    if (!newFingerprint.equals(lastReportedFingerprint)) {
+                        lastReportedFingerprint = newFingerprint;
                         if (onFingerprintChanged != null) {
                             onFingerprintChanged.accept(newFingerprint);
                         }
@@ -134,18 +207,37 @@ public class IntegrityWatcher {
     private void rehashFile(Path file) {
         try {
             String rel = FingerprintUtil.normalizePath(gameRoot.relativize(file).toString());
-            if (currentHashes.containsKey(rel)) {
-                if (Files.isRegularFile(file) && FingerprintUtil.isSafePath(gameRoot, rel)) {
+            if (rel.isEmpty() || !FingerprintUtil.isSafePath(gameRoot, rel)) {
+                return;
+            }
+
+            boolean isOfficial = officialProtected.contains(rel);
+
+            if (isOfficial) {
+                if (Files.isRegularFile(file)) {
                     currentHashes.put(rel, FingerprintUtil.sha256Hex(file));
                 } else {
                     currentHashes.put(rel, "MISSING");
+                }
+            } else {
+                // Unknown / Extra file
+                String policy = sessionData != null ? sessionData.resolveEffectivePolicy(rel) : null;
+                if ("NO_MODIFICABLE".equalsIgnoreCase(policy)) {
+                    if (Files.isRegularFile(file)) {
+                        currentHashes.put(rel, FingerprintUtil.sha256Hex(file));
+                    } else {
+                        currentHashes.remove(rel);
+                    }
+                } else {
+                    currentHashes.remove(rel);
                 }
             }
         } catch (Exception ignored) {}
     }
 
     private void rescanAll() {
-        for (String rel : new HashSet<>(currentHashes.keySet())) {
+        // 1. Re-check official protected files
+        for (String rel : officialProtected) {
             Path file = gameRoot.resolve(rel);
             try {
                 if (Files.isRegularFile(file) && FingerprintUtil.isSafePath(gameRoot, rel)) {
@@ -155,6 +247,42 @@ public class IntegrityWatcher {
                 }
             } catch (Exception e) {
                 currentHashes.put(rel, "ERROR");
+            }
+        }
+
+        // 2. Remove extra files that no longer exist
+        for (String rel : new HashSet<>(currentHashes.keySet())) {
+            if (!officialProtected.contains(rel)) {
+                Path file = gameRoot.resolve(rel);
+                if (!Files.exists(file)) {
+                    currentHashes.remove(rel);
+                }
+            }
+        }
+
+        // 3. Re-scan directoryPolicies for any extra files
+        if (sessionData != null && sessionData.directoryPolicies() != null) {
+            for (SessionData.PolicyEntry dp : sessionData.directoryPolicies()) {
+                if (dp == null || dp.path() == null) continue;
+                String dirNorm = FingerprintUtil.normalizePath(dp.path());
+                Path dirPath = dirNorm.isEmpty() ? gameRoot : gameRoot.resolve(dirNorm);
+                if (Files.exists(dirPath) && Files.isDirectory(dirPath)) {
+                    try (var stream = Files.walk(dirPath)) {
+                        stream.filter(Files::isRegularFile).forEach(file -> {
+                            String rel = FingerprintUtil.normalizePath(gameRoot.relativize(file).toString());
+                            if (!officialProtected.contains(rel) && FingerprintUtil.isSafePath(gameRoot, rel)) {
+                                String policy = sessionData.resolveEffectivePolicy(rel);
+                                if ("NO_MODIFICABLE".equalsIgnoreCase(policy)) {
+                                    try {
+                                        currentHashes.put(rel, FingerprintUtil.sha256Hex(file));
+                                    } catch (IOException e) {
+                                        currentHashes.put(rel, "ERROR");
+                                    }
+                                }
+                            }
+                        });
+                    } catch (IOException ignored) {}
+                }
             }
         }
     }
@@ -173,5 +301,9 @@ public class IntegrityWatcher {
 
     public boolean isRunning() {
         return running;
+    }
+
+    public Map<String, String> getCurrentHashes() {
+        return new HashMap<>(currentHashes);
     }
 }

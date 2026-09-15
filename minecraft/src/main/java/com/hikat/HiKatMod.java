@@ -51,7 +51,7 @@ public class HiKatMod {
 
     private void initServer() {
         Path serverRoot = FMLPaths.GAMEDIR.get();
-        String jwksUrl = System.getProperty("hikat.jwks.url", "http://localhost:8788/.well-known/jwks.json");
+        String jwksUrl = System.getProperty("hikat.jwks.url", "https://auth.hikat.org/.well-known/jwks.json");
         GameTokenVerifier tokenVerifier = new GameTokenVerifier("hikat-minecraft", jwksUrl, null);
         IntegrityService integrityService = new IntegrityService(serverRoot);
         HiKatWhitelist whitelist = new HiKatWhitelist(serverRoot);
@@ -205,6 +205,7 @@ public class HiKatMod {
                     Path gameDir = FMLPaths.GAMEDIR.get();
                     integrityWatcher = new IntegrityWatcher(
                         gameDir,
+                        clientSnapshot.sessionData(),
                         clientSnapshot.fileHashes(),
                         clientSnapshot.fingerprint(),
                         newFingerprint -> {

@@ -2991,6 +2991,8 @@ ipcMain.handle("game-write-session", async (_event, payload = {}) => {
     releaseId: payload.releaseId || "",
     gameToken: payload.gameToken || "",
     protectedFiles: Array.isArray(payload.protectedFiles) ? payload.protectedFiles : [],
+    filePolicies: Array.isArray(payload.filePolicies) ? payload.filePolicies : [],
+    directoryPolicies: Array.isArray(payload.directoryPolicies) ? payload.directoryPolicies : [],
   }, null, 2)
   fs.writeFileSync(tmpPath, data, "utf8")
   fs.renameSync(tmpPath, sessionPath)

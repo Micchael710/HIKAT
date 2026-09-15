@@ -633,6 +633,8 @@ export const gameService = {
     gameToken: string
     releaseId: string
     protectedFiles: string[]
+    filePolicies?: Array<{ path: string; policy: string }>
+    directoryPolicies?: Array<{ path: string; policy: string }>
     gameContext?: { gameId: string; gameName: string }
   }) {
     if (window.electronAPI?.writeGameSession) {
@@ -640,6 +642,8 @@ export const gameService = {
         gameToken: options.gameToken,
         releaseId: options.releaseId,
         protectedFiles: options.protectedFiles,
+        filePolicies: options.filePolicies,
+        directoryPolicies: options.directoryPolicies,
         gameId: options.gameContext?.gameId,
         gameName: options.gameContext?.gameName,
       })
@@ -649,6 +653,8 @@ export const gameService = {
   startSessionRenewal(payload: {
     releaseId: string
     protectedFiles: string[]
+    filePolicies?: Array<{ path: string; policy: string }>
+    directoryPolicies?: Array<{ path: string; policy: string }>
     gameContext?: { gameId: string; gameName: string }
   }) {
     this.stopSessionRenewal()
@@ -657,6 +663,8 @@ export const gameService = {
       gameName: payload.gameContext?.gameName,
       releaseId: payload.releaseId,
       protectedFiles: payload.protectedFiles,
+      filePolicies: payload.filePolicies,
+      directoryPolicies: payload.directoryPolicies,
     }
 
     sessionRenewalTimer = setInterval(async () => {
@@ -681,6 +689,8 @@ export const gameService = {
             gameToken,
             releaseId: activePayload.releaseId,
             protectedFiles: activePayload.protectedFiles,
+            filePolicies: activePayload.filePolicies,
+            directoryPolicies: activePayload.directoryPolicies,
             gameId: activePayload.gameId,
             gameName: activePayload.gameName,
           })

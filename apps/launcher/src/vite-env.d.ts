@@ -193,6 +193,8 @@ interface ElectronAPI {
     gameToken: string
     releaseId: string
     protectedFiles: string[]
+    filePolicies?: Array<{ path: string; policy: string }>
+    directoryPolicies?: Array<{ path: string; policy: string }>
   }) => Promise<{ success: boolean }>
   launchGame?: (options: {
     playerName?: string
