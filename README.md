@@ -17,8 +17,7 @@ HiKAT/
 │   ├── graphql/              # Authoritative GraphQL schema definitions
 │   └── config/               # Shared TypeScript and tooling configs
 ├── infrastructure/
-│   ├── cloudflare/           # Cloudflare Worker, D1, and R2 templates
-│   └── fly/                  # Fly.io deployment configurations
+│   └── cloudflare/           # Cloudflare Worker, D1, and R2 templates
 └── docs/                     # Complete Architecture & System Specifications
 ```
 
