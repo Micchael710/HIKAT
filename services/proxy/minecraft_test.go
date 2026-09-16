@@ -191,7 +191,6 @@ func TestBuildLoginDisconnectLegacyJSON(t *testing.T) {
 		t.Fatalf("Failed to read JSON bytes: %v", err)
 	}
 
-	// Expected JSON: {"text":"<mensaje>"} without literal backslashes
 	expectedJSON := `{"text":"` + msg + `"}`
 	if string(jsonBytes) != expectedJSON {
 		t.Errorf("Expected JSON %q, got %q", expectedJSON, string(jsonBytes))
