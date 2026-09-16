@@ -86,8 +86,11 @@ func main() {
 
 	backend := NewBackendClient(cfg.BackendURL, cfg.ProxySecret)
 
+	// Global connection limit semaphore
+	sem := make(chan struct{}, cfg.MaxConnections)
+
 	// Auxiliary Route Manager (TCP + UDP)
-	routeMgr := NewRouteManager(backend)
+	routeMgr := NewRouteManager(backend, sem)
 	refreshInterval := time.Duration(cfg.RoutesRefreshSec) * time.Second
 	if refreshInterval <= 0 {
 		refreshInterval = DefaultRoutesRefreshSec * time.Second
@@ -102,9 +105,6 @@ func main() {
 
 	log.Printf("[Proxy] HiKAT Minecraft Proxy listening on %s (backend: %s, max_conns: %d)",
 		cfg.ListenAddr, cfg.BackendURL, cfg.MaxConnections)
-
-	// Global connection limit semaphore
-	sem := make(chan struct{}, cfg.MaxConnections)
 
 	// Graceful shutdown channels
 	stopChan := make(chan os.Signal, 1)
@@ -281,6 +281,18 @@ func pipe(c1, c2 net.Conn) {
 
 // --- Auxiliary Forwarding (TCP + UDP) ---
 
+func tryAcquireUDPSession(counter *int32, limit int) bool {
+	for {
+		curr := atomic.LoadInt32(counter)
+		if curr >= int32(limit) {
+			return false
+		}
+		if atomic.CompareAndSwapInt32(counter, curr, curr+1) {
+			return true
+		}
+	}
+}
+
 type udpSession struct {
 	targetConn *net.UDPConn
 	lastSeen   time.Time
@@ -354,8 +366,8 @@ func (u *udpListenerInstance) readLoop() {
 			continue
 		}
 
-		// New session: check defensive global limit (max 1000)
-		if atomic.LoadInt32(u.globalUDPSessions) >= int32(maxUDPSessions) {
+		// New session: atomic reservation across all listeners
+		if !tryAcquireUDPSession(u.globalUDPSessions, maxUDPSessions) {
 			u.mu.Unlock()
 			log.Printf("[Proxy] Global UDP sessions limit (%d) reached, dropping packet on port %d",
 				maxUDPSessions, u.publicPort)
@@ -364,17 +376,18 @@ func (u *udpListenerInstance) readLoop() {
 
 		targetUDPAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", u.targetHost, u.targetPort))
 		if err != nil {
+			atomic.AddInt32(u.globalUDPSessions, -1)
 			u.mu.Unlock()
 			continue
 		}
 
 		targetConn, err := net.DialUDP("udp", nil, targetUDPAddr)
 		if err != nil {
+			atomic.AddInt32(u.globalUDPSessions, -1)
 			u.mu.Unlock()
 			continue
 		}
 
-		atomic.AddInt32(u.globalUDPSessions, 1)
 		newSess := &udpSession{
 			targetConn: targetConn,
 			lastSeen:   time.Now(),
@@ -442,11 +455,14 @@ type tcpListenerInstance struct {
 	targetHost string
 	targetPort int
 	listener   net.Listener
+	conns      map[net.Conn]struct{}
+	connsMu    sync.Mutex
 	stopChan   chan struct{}
 	stopOnce   sync.Once
+	tcpSem     chan struct{}
 }
 
-func startTCPRoute(route ProxyRoute) (*tcpListenerInstance, error) {
+func startTCPRoute(route ProxyRoute, tcpSem chan struct{}) (*tcpListenerInstance, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", route.PublicPort))
 	if err != nil {
 		return nil, fmt.Errorf("failed to bind TCP listener on port %d: %w", route.PublicPort, err)
@@ -457,7 +473,9 @@ func startTCPRoute(route ProxyRoute) (*tcpListenerInstance, error) {
 		targetHost: route.TargetHost,
 		targetPort: route.TargetPort,
 		listener:   listener,
+		conns:      make(map[net.Conn]struct{}),
 		stopChan:   make(chan struct{}),
+		tcpSem:     tcpSem,
 	}
 
 	go t.acceptLoop()
@@ -481,8 +499,40 @@ func (t *tcpListenerInstance) acceptLoop() {
 			}
 		}
 
+		if t.tcpSem != nil {
+			select {
+			case t.tcpSem <- struct{}{}:
+			default:
+				log.Printf("[Proxy] Max global TCP connections reached, dropping auxiliary connection on port %d", t.publicPort)
+				clientConn.Close()
+				continue
+			}
+		}
+
+		t.connsMu.Lock()
+		select {
+		case <-t.stopChan:
+			t.connsMu.Unlock()
+			if t.tcpSem != nil {
+				<-t.tcpSem
+			}
+			clientConn.Close()
+			return
+		default:
+			t.conns[clientConn] = struct{}{}
+			t.connsMu.Unlock()
+		}
+
 		go func(cConn net.Conn) {
-			defer cConn.Close()
+			defer func() {
+				cConn.Close()
+				t.connsMu.Lock()
+				delete(t.conns, cConn)
+				t.connsMu.Unlock()
+				if t.tcpSem != nil {
+					<-t.tcpSem
+				}
+			}()
 
 			targetAddr := fmt.Sprintf("%s:%d", t.targetHost, t.targetPort)
 			targetConn, dialErr := net.DialTimeout("tcp", targetAddr, TargetDialTimeout)
@@ -501,6 +551,13 @@ func (t *tcpListenerInstance) stop() {
 	t.stopOnce.Do(func() {
 		close(t.stopChan)
 		_ = t.listener.Close()
+
+		t.connsMu.Lock()
+		for c := range t.conns {
+			_ = c.Close()
+		}
+		t.conns = make(map[net.Conn]struct{})
+		t.connsMu.Unlock()
 	})
 }
 
@@ -515,14 +572,20 @@ type RouteManager struct {
 	mu                sync.Mutex
 	activeRoutes      map[int]*routeEntry
 	globalUDPSessions int32
+	tcpSem            chan struct{}
 	stopChan          chan struct{}
 	stopOnce          sync.Once
 }
 
-func NewRouteManager(backend *BackendClient) *RouteManager {
+func NewRouteManager(backend *BackendClient, tcpSem ...chan struct{}) *RouteManager {
+	var sem chan struct{}
+	if len(tcpSem) > 0 {
+		sem = tcpSem[0]
+	}
 	return &RouteManager{
 		backend:      backend,
 		activeRoutes: make(map[int]*routeEntry),
+		tcpSem:       sem,
 		stopChan:     make(chan struct{}),
 	}
 }
@@ -562,26 +625,31 @@ func (m *RouteManager) SyncRoutes(ctx context.Context) error {
 		}
 	}
 
-	// 2. Add newly registered routes
+	// 2. Add newly registered or recover partial routes
 	for port, r := range newRouteMap {
-		if _, alreadyActive := m.activeRoutes[port]; alreadyActive {
-			continue
+		entry, alreadyActive := m.activeRoutes[port]
+		if !alreadyActive {
+			entry = &routeEntry{route: r}
 		}
 
-		entry := &routeEntry{route: r}
-
-		tcpInst, tcpErr := startTCPRoute(r)
-		if tcpErr != nil {
-			log.Printf("[Proxy] Warning: Failed starting auxiliary TCP on port %d: %v", port, tcpErr)
-		} else {
-			entry.tcpInstance = tcpInst
+		// Try starting TCP if not already running
+		if entry.tcpInstance == nil {
+			tcpInst, tcpErr := startTCPRoute(r, m.tcpSem)
+			if tcpErr != nil {
+				log.Printf("[Proxy] Warning: Failed starting auxiliary TCP on port %d: %v", port, tcpErr)
+			} else {
+				entry.tcpInstance = tcpInst
+			}
 		}
 
-		udpInst, udpErr := startUDPRoute(r, &m.globalUDPSessions)
-		if udpErr != nil {
-			log.Printf("[Proxy] Warning: Failed starting auxiliary UDP on port %d: %v", port, udpErr)
-		} else {
-			entry.udpInstance = udpInst
+		// Try starting UDP if not already running
+		if entry.udpInstance == nil {
+			udpInst, udpErr := startUDPRoute(r, &m.globalUDPSessions)
+			if udpErr != nil {
+				log.Printf("[Proxy] Warning: Failed starting auxiliary UDP on port %d: %v", port, udpErr)
+			} else {
+				entry.udpInstance = udpInst
+			}
 		}
 
 		if entry.tcpInstance != nil || entry.udpInstance != nil {
