@@ -10,23 +10,36 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
 
 const (
-	DefaultListenAddr     = ":25565"
-	DefaultBackendURL     = "http://127.0.0.1:8787"
-	DefaultMaxConnections = 300
-	HandshakeTimeout      = 3 * time.Second
-	TargetDialTimeout     = 1 * time.Second
+	DefaultListenAddr         = ":25565"
+	DefaultBackendURL         = "http://127.0.0.1:8787"
+	DefaultMaxConnections     = 300
+	DefaultMaxUDPSessions     = 1000
+	DefaultUDPInactivity      = 30 * time.Second
+	DefaultUDPCleanupInterval = 15 * time.Second
+	DefaultRoutesRefreshSec   = 60
+	HandshakeTimeout          = 3 * time.Second
+	TargetDialTimeout         = 1 * time.Second
+)
+
+var (
+	maxUDPSessions     = DefaultMaxUDPSessions
+	udpInactivity      = DefaultUDPInactivity
+	udpCleanupInterval = DefaultUDPCleanupInterval
 )
 
 type Config struct {
-	ListenAddr     string
-	BackendURL     string
-	ProxySecret    string
-	MaxConnections int
+	ListenAddr       string
+	BackendURL       string
+	ProxySecret      string
+	MaxConnections   int
+	RoutesRefreshSec int
 }
 
 func loadConfig() Config {
@@ -49,11 +62,19 @@ func loadConfig() Config {
 		}
 	}
 
+	refreshSec := DefaultRoutesRefreshSec
+	if refreshStr := os.Getenv("ROUTES_REFRESH_SEC"); refreshStr != "" {
+		if val, err := strconv.Atoi(refreshStr); err == nil && val > 0 {
+			refreshSec = val
+		}
+	}
+
 	return Config{
-		ListenAddr:     listenAddr,
-		BackendURL:     backendURL,
-		ProxySecret:    secret,
-		MaxConnections: maxConn,
+		ListenAddr:       listenAddr,
+		BackendURL:       backendURL,
+		ProxySecret:      secret,
+		MaxConnections:   maxConn,
+		RoutesRefreshSec: refreshSec,
 	}
 }
 
@@ -64,6 +85,14 @@ func main() {
 	}
 
 	backend := NewBackendClient(cfg.BackendURL, cfg.ProxySecret)
+
+	// Auxiliary Route Manager (TCP + UDP)
+	routeMgr := NewRouteManager(backend)
+	refreshInterval := time.Duration(cfg.RoutesRefreshSec) * time.Second
+	if refreshInterval <= 0 {
+		refreshInterval = DefaultRoutesRefreshSec * time.Second
+	}
+	routeMgr.Start(context.Background(), refreshInterval)
 
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
@@ -84,7 +113,8 @@ func main() {
 
 	go func() {
 		<-stopChan
-		log.Println("[Proxy] Shutting down listener...")
+		log.Println("[Proxy] Shutting down listener and auxiliary routes...")
+		routeMgr.Stop()
 		close(done)
 		listener.Close()
 	}()
@@ -247,4 +277,360 @@ func pipe(c1, c2 net.Conn) {
 	}()
 
 	<-done
+}
+
+// --- Auxiliary Forwarding (TCP + UDP) ---
+
+type udpSession struct {
+	targetConn *net.UDPConn
+	lastSeen   time.Time
+}
+
+type udpListenerInstance struct {
+	publicPort        int
+	targetHost        string
+	targetPort        int
+	listener          *net.UDPConn
+	sessions          map[string]*udpSession
+	mu                sync.Mutex
+	globalUDPSessions *int32
+	stopChan          chan struct{}
+	stopOnce          sync.Once
+}
+
+func startUDPRoute(route ProxyRoute, globalCounter *int32) (*udpListenerInstance, error) {
+	listenAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf(":%d", route.PublicPort))
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve UDP listen addr for port %d: %w", route.PublicPort, err)
+	}
+
+	listener, err := net.ListenUDP("udp", listenAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to bind UDP listener on port %d: %w", route.PublicPort, err)
+	}
+
+	u := &udpListenerInstance{
+		publicPort:        listener.LocalAddr().(*net.UDPAddr).Port,
+		targetHost:        route.TargetHost,
+		targetPort:        route.TargetPort,
+		listener:          listener,
+		sessions:          make(map[string]*udpSession),
+		globalUDPSessions: globalCounter,
+		stopChan:          make(chan struct{}),
+	}
+
+	go u.readLoop()
+	go u.cleanupLoop()
+
+	log.Printf("[Proxy] Auxiliary UDP listener started on :%d -> %s:%d", route.PublicPort, route.TargetHost, route.TargetPort)
+	return u, nil
+}
+
+func (u *udpListenerInstance) readLoop() {
+	buf := make([]byte, 2048)
+
+	for {
+		n, clientAddr, err := u.listener.ReadFromUDP(buf)
+		if err != nil {
+			select {
+			case <-u.stopChan:
+				return
+			default:
+				if errors.Is(err, net.ErrClosed) {
+					return
+				}
+				continue
+			}
+		}
+
+		clientKey := clientAddr.String()
+
+		u.mu.Lock()
+		sess, exists := u.sessions[clientKey]
+		if exists {
+			sess.lastSeen = time.Now()
+			u.mu.Unlock()
+			_, _ = sess.targetConn.Write(buf[:n])
+			continue
+		}
+
+		// New session: check defensive global limit (max 1000)
+		if atomic.LoadInt32(u.globalUDPSessions) >= int32(maxUDPSessions) {
+			u.mu.Unlock()
+			log.Printf("[Proxy] Global UDP sessions limit (%d) reached, dropping packet on port %d",
+				maxUDPSessions, u.publicPort)
+			continue
+		}
+
+		targetUDPAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", u.targetHost, u.targetPort))
+		if err != nil {
+			u.mu.Unlock()
+			continue
+		}
+
+		targetConn, err := net.DialUDP("udp", nil, targetUDPAddr)
+		if err != nil {
+			u.mu.Unlock()
+			continue
+		}
+
+		atomic.AddInt32(u.globalUDPSessions, 1)
+		newSess := &udpSession{
+			targetConn: targetConn,
+			lastSeen:   time.Now(),
+		}
+		u.sessions[clientKey] = newSess
+		u.mu.Unlock()
+
+		// Send initial datagram
+		_, _ = targetConn.Write(buf[:n])
+
+		// Stream target responses back through the public listener to the client
+		go func(cAddr *net.UDPAddr, tConn *net.UDPConn, pubListener *net.UDPConn) {
+			respBuf := make([]byte, 2048)
+			for {
+				rn, rErr := tConn.Read(respBuf)
+				if rErr != nil {
+					return
+				}
+				_, _ = pubListener.WriteToUDP(respBuf[:rn], cAddr)
+			}
+		}(clientAddr, targetConn, u.listener)
+	}
+}
+
+func (u *udpListenerInstance) cleanupLoop() {
+	ticker := time.NewTicker(udpCleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-u.stopChan:
+			return
+		case <-ticker.C:
+			u.mu.Lock()
+			now := time.Now()
+			for key, sess := range u.sessions {
+				if now.Sub(sess.lastSeen) > udpInactivity {
+					_ = sess.targetConn.Close()
+					delete(u.sessions, key)
+					atomic.AddInt32(u.globalUDPSessions, -1)
+				}
+			}
+			u.mu.Unlock()
+		}
+	}
+}
+
+func (u *udpListenerInstance) stop() {
+	u.stopOnce.Do(func() {
+		close(u.stopChan)
+		_ = u.listener.Close()
+
+		u.mu.Lock()
+		defer u.mu.Unlock()
+		for _, sess := range u.sessions {
+			_ = sess.targetConn.Close()
+			atomic.AddInt32(u.globalUDPSessions, -1)
+		}
+		u.sessions = make(map[string]*udpSession)
+	})
+}
+
+type tcpListenerInstance struct {
+	publicPort int
+	targetHost string
+	targetPort int
+	listener   net.Listener
+	stopChan   chan struct{}
+	stopOnce   sync.Once
+}
+
+func startTCPRoute(route ProxyRoute) (*tcpListenerInstance, error) {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", route.PublicPort))
+	if err != nil {
+		return nil, fmt.Errorf("failed to bind TCP listener on port %d: %w", route.PublicPort, err)
+	}
+
+	t := &tcpListenerInstance{
+		publicPort: listener.Addr().(*net.TCPAddr).Port,
+		targetHost: route.TargetHost,
+		targetPort: route.TargetPort,
+		listener:   listener,
+		stopChan:   make(chan struct{}),
+	}
+
+	go t.acceptLoop()
+
+	log.Printf("[Proxy] Auxiliary TCP listener started on :%d -> %s:%d", route.PublicPort, route.TargetHost, route.TargetPort)
+	return t, nil
+}
+
+func (t *tcpListenerInstance) acceptLoop() {
+	for {
+		clientConn, err := t.listener.Accept()
+		if err != nil {
+			select {
+			case <-t.stopChan:
+				return
+			default:
+				if errors.Is(err, net.ErrClosed) {
+					return
+				}
+				continue
+			}
+		}
+
+		go func(cConn net.Conn) {
+			defer cConn.Close()
+
+			targetAddr := fmt.Sprintf("%s:%d", t.targetHost, t.targetPort)
+			targetConn, dialErr := net.DialTimeout("tcp", targetAddr, TargetDialTimeout)
+			if dialErr != nil {
+				// Target is down/unreachable: close incoming connection
+				return
+			}
+			defer targetConn.Close()
+
+			pipe(cConn, targetConn)
+		}(clientConn)
+	}
+}
+
+func (t *tcpListenerInstance) stop() {
+	t.stopOnce.Do(func() {
+		close(t.stopChan)
+		_ = t.listener.Close()
+	})
+}
+
+type routeEntry struct {
+	route       ProxyRoute
+	tcpInstance *tcpListenerInstance
+	udpInstance *udpListenerInstance
+}
+
+type RouteManager struct {
+	backend           *BackendClient
+	mu                sync.Mutex
+	activeRoutes      map[int]*routeEntry
+	globalUDPSessions int32
+	stopChan          chan struct{}
+	stopOnce          sync.Once
+}
+
+func NewRouteManager(backend *BackendClient) *RouteManager {
+	return &RouteManager{
+		backend:      backend,
+		activeRoutes: make(map[int]*routeEntry),
+		stopChan:     make(chan struct{}),
+	}
+}
+
+func (m *RouteManager) SyncRoutes(ctx context.Context) error {
+	select {
+	case <-m.stopChan:
+		return nil
+	default:
+	}
+
+	routes, err := m.backend.GetRoutes(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get routes from backend: %w", err)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	newRouteMap := make(map[int]ProxyRoute)
+	for _, r := range routes {
+		newRouteMap[r.PublicPort] = r
+	}
+
+	// 1. Remove obsolete or changed routes
+	for port, entry := range m.activeRoutes {
+		newR, stillExists := newRouteMap[port]
+		if !stillExists || newR.TargetHost != entry.route.TargetHost || newR.TargetPort != entry.route.TargetPort {
+			log.Printf("[Proxy] Removing obsolete auxiliary route on port %d", port)
+			if entry.tcpInstance != nil {
+				entry.tcpInstance.stop()
+			}
+			if entry.udpInstance != nil {
+				entry.udpInstance.stop()
+			}
+			delete(m.activeRoutes, port)
+		}
+	}
+
+	// 2. Add newly registered routes
+	for port, r := range newRouteMap {
+		if _, alreadyActive := m.activeRoutes[port]; alreadyActive {
+			continue
+		}
+
+		entry := &routeEntry{route: r}
+
+		tcpInst, tcpErr := startTCPRoute(r)
+		if tcpErr != nil {
+			log.Printf("[Proxy] Warning: Failed starting auxiliary TCP on port %d: %v", port, tcpErr)
+		} else {
+			entry.tcpInstance = tcpInst
+		}
+
+		udpInst, udpErr := startUDPRoute(r, &m.globalUDPSessions)
+		if udpErr != nil {
+			log.Printf("[Proxy] Warning: Failed starting auxiliary UDP on port %d: %v", port, udpErr)
+		} else {
+			entry.udpInstance = udpInst
+		}
+
+		if entry.tcpInstance != nil || entry.udpInstance != nil {
+			m.activeRoutes[port] = entry
+		}
+	}
+
+	return nil
+}
+
+func (m *RouteManager) Start(ctx context.Context, interval time.Duration) {
+	if err := m.SyncRoutes(ctx); err != nil {
+		log.Printf("[Proxy] Initial routes sync warning: %v", err)
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-m.stopChan:
+				return
+			case <-ticker.C:
+				syncCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				if err := m.SyncRoutes(syncCtx); err != nil {
+					log.Printf("[Proxy] Periodic routes sync warning: %v", err)
+				}
+				cancel()
+			}
+		}
+	}()
+}
+
+func (m *RouteManager) Stop() {
+	m.stopOnce.Do(func() {
+		close(m.stopChan)
+
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		for port, entry := range m.activeRoutes {
+			if entry.tcpInstance != nil {
+				entry.tcpInstance.stop()
+			}
+			if entry.udpInstance != nil {
+				entry.udpInstance.stop()
+			}
+			delete(m.activeRoutes, port)
+		}
+	})
 }
