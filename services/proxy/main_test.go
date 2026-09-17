@@ -198,7 +198,8 @@ func TestFlowLoginStarted(t *testing.T) {
 	}
 
 	// Contains the started message
-	if !strings.Contains(string(buf[:n]), "El servidor se acaba de iniciar") {
+	expectedMsg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
+	if !strings.Contains(string(buf[:n]), expectedMsg) {
 		t.Errorf("Disconnect packet does not contain started message: %q", string(buf[:n]))
 	}
 }
@@ -249,7 +250,8 @@ func TestFlowLoginStarting(t *testing.T) {
 		t.Fatal("Expected disconnect packet, got 0 bytes")
 	}
 
-	if !strings.Contains(string(buf[:n]), "El servidor se está iniciando") {
+	expectedMsg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
+	if !strings.Contains(string(buf[:n]), expectedMsg) {
 		t.Errorf("Disconnect packet does not contain starting message: %q", string(buf[:n]))
 	}
 }
@@ -334,9 +336,10 @@ func TestFlowLoginStopping(t *testing.T) {
 	}
 }
 
-func TestFlowLoginOnlineButUnreachablePortTreatedAsStarting(t *testing.T) {
-	// Backend claims online, but target port is closed (server process still warming up)
+func TestFlowLoginOnlineTargetInaccessible(t *testing.T) {
+	backendCalls := 0
 	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backendCalls++
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(ConnectResponse{
 			Status:     "ONLINE",
@@ -379,9 +382,23 @@ func TestFlowLoginOnlineButUnreachablePortTreatedAsStarting(t *testing.T) {
 		t.Fatalf("Failed to read login disconnect packet: %v", err)
 	}
 
-	// Must gracefully treat unreachable online target as STARTING
-	if !strings.Contains(string(buf[:n]), "El servidor se está iniciando") {
-		t.Errorf("Expected fallback to starting message, got %q", string(buf[:n]))
+	if n == 0 {
+		t.Fatal("Expected disconnect packet, got 0 bytes")
+	}
+
+	expectedMsg := "El servidor está encendido, pero no está aceptando conexiones en este momento. Inténtalo nuevamente en unos segundos."
+	if !strings.Contains(string(buf[:n]), expectedMsg) {
+		t.Errorf("Expected disconnect packet to contain %q, got: %q", expectedMsg, string(buf[:n]))
+	}
+
+	// Must NOT state STARTING
+	if strings.Contains(string(buf[:n]), "El servidor se está iniciando") {
+		t.Errorf("Did not expect message to claim STARTING, got: %q", string(buf[:n]))
+	}
+
+	// Must NOT make additional calls to Backend (no wake, no polling)
+	if backendCalls != 1 {
+		t.Errorf("Expected exactly 1 backend call, got %d", backendCalls)
 	}
 }
 

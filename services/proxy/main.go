@@ -225,7 +225,7 @@ func handleStatusPing(clientConn net.Conn, hs *Handshake, resp *ConnectResponse)
 func handleLogin(clientConn net.Conn, hs *Handshake, resp *ConnectResponse) {
 	switch resp.Status {
 	case "STARTED":
-		msg := "El servidor se acaba de iniciar. Inténtalo nuevamente en unos segundos."
+		msg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
 		pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
 		sendLoginDisconnect(clientConn, pkt)
 
@@ -243,9 +243,8 @@ func handleLogin(clientConn net.Conn, hs *Handshake, resp *ConnectResponse) {
 		targetAddr := fmt.Sprintf("%s:%d", resp.TargetHost, resp.TargetPort)
 		targetConn, err := net.DialTimeout("tcp", targetAddr, TargetDialTimeout)
 		if err != nil {
-			// Target process may still be opening socket: treat locally as STARTING
-			log.Printf("[Proxy] Online target %s not reachable yet, treating as STARTING: %v", targetAddr, err)
-			msg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
+			log.Printf("[Proxy] Online target %s is not accepting connections: %v", targetAddr, err)
+			msg := "El servidor está encendido, pero no está aceptando conexiones en este momento. Inténtalo nuevamente en unos segundos."
 			pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
 			sendLoginDisconnect(clientConn, pkt)
 			return
