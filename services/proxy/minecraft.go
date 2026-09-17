@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -162,44 +163,19 @@ func ReadHandshake(r io.Reader) (*Handshake, error) {
 }
 
 // BuildLoginDisconnect generates the Minecraft Login Disconnect packet (Packet ID 0x00).
-// Handles JSON Component format for protocol <= 764 (Java 1.7 to 1.20.2)
-// and Anonymous Network NBT format for protocol >= 765 (Java 1.20.3+).
+// In Minecraft Java (all supported versions 1.7 through 1.21+), ClientboundLoginDisconnectPacket
+// body consists of a single Minecraft String containing the JSON Text Component.
 func BuildLoginDisconnect(protocolVersion int, message string) []byte {
-	var body []byte
-
-	if protocolVersion <= 764 {
-		// Protocol <= 764: JSON Component String
-		jsonPayload := fmt.Sprintf(`{"text":%q}`, message)
-		jsonBytes := []byte(jsonPayload)
-		lenVarInt := EncodeVarInt(int32(len(jsonBytes)))
-		body = append(body, lenVarInt...)
-		body = append(body, jsonBytes...)
-	} else {
-		// Protocol >= 765: Anonymous Network NBT Component
-		// 0x0A: TAG_Compound (root anonymous tag)
-		// 0x08: TAG_String
-		// uint16 big-endian: length of tag name "text" (4)
-		// []byte("text")
-		// uint16 big-endian: length of message
-		// []byte(message)
-		// 0x00: TAG_End
-		msgBytes := []byte(message)
-
-		var nbt bytes.Buffer
-		nbt.WriteByte(0x0A) // TAG_Compound
-		nbt.WriteByte(0x08) // TAG_String
-
-		nameBytes := []byte("text")
-		_ = binary.Write(&nbt, binary.BigEndian, uint16(len(nameBytes)))
-		nbt.Write(nameBytes)
-
-		_ = binary.Write(&nbt, binary.BigEndian, uint16(len(msgBytes)))
-		nbt.Write(msgBytes)
-
-		nbt.WriteByte(0x00) // TAG_End
-
-		body = nbt.Bytes()
+	jsonBytes, err := json.Marshal(map[string]string{"text": message})
+	if err != nil {
+		jsonBytes = []byte(fmt.Sprintf(`{"text":%q}`, message))
 	}
+
+	lenVarInt := EncodeVarInt(int32(len(jsonBytes)))
+
+	body := make([]byte, 0, len(lenVarInt)+len(jsonBytes))
+	body = append(body, lenVarInt...)
+	body = append(body, jsonBytes...)
 
 	// Packet ID 0x00 in Login state
 	packetID := EncodeVarInt(0x00)

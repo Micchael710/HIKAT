@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 )
@@ -187,7 +188,7 @@ func TestBuildLoginDisconnectLegacyJSON(t *testing.T) {
 	}
 
 	jsonBytes := make([]byte, strLen)
-	if _, err := reader.Read(jsonBytes); err != nil {
+	if _, err := io.ReadFull(reader, jsonBytes); err != nil {
 		t.Fatalf("Failed to read JSON bytes: %v", err)
 	}
 
@@ -211,73 +212,104 @@ func TestBuildLoginDisconnectLegacyJSON(t *testing.T) {
 	if parsed.Text != msg {
 		t.Errorf("Expected parsed text %q, got %q", msg, parsed.Text)
 	}
+
+	// Verify no extra bytes remain
+	if reader.Len() != 0 {
+		t.Errorf("Expected 0 bytes remaining after reading string, got %d", reader.Len())
+	}
 }
 
-func TestBuildLoginDisconnectModernNBT(t *testing.T) {
-	// Protocol >= 765: Anonymous Network NBT component format
-	msg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
-	pkt := BuildLoginDisconnect(765, msg)
+func TestBuildLoginDisconnectModernProtocols(t *testing.T) {
+	// Protocols 765 (1.20.3) and 767 (1.21.1) must also use Minecraft String + JSON Text Component
+	protocols := []int{765, 767}
+	msg := "El servidor se acaba de iniciar. Inténtalo nuevamente en unos segundos."
+
+	for _, proto := range protocols {
+		pkt := BuildLoginDisconnect(proto, msg)
+
+		reader := bytes.NewReader(pkt)
+
+		// 1. Packet length VarInt
+		pktLen, _, err := ReadVarInt(reader)
+		if err != nil {
+			t.Fatalf("[proto %d] Failed to read packet length: %v", proto, err)
+		}
+		if int(pktLen) != reader.Len() {
+			t.Errorf("[proto %d] Packet length mismatch: declared %d, remaining %d", proto, pktLen, reader.Len())
+		}
+
+		// 2. Packet ID 0x00
+		pktID, _, err := ReadVarInt(reader)
+		if err != nil || pktID != 0x00 {
+			t.Fatalf("[proto %d] Expected packet ID 0x00, got %d (err: %v)", proto, pktID, err)
+		}
+
+		// 3. String length VarInt
+		strLen, _, err := ReadVarInt(reader)
+		if err != nil {
+			t.Fatalf("[proto %d] Failed to read string length: %v", proto, err)
+		}
+
+		// 4. JSON bytes
+		jsonBytes := make([]byte, strLen)
+		if _, err := io.ReadFull(reader, jsonBytes); err != nil {
+			t.Fatalf("[proto %d] Failed to read JSON bytes: %v", proto, err)
+		}
+
+		// 5. Unmarshal and verify text == message
+		var parsed struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(jsonBytes, &parsed); err != nil {
+			t.Fatalf("[proto %d] Failed to unmarshal JSON disconnect string: %v", proto, err)
+		}
+		if parsed.Text != msg {
+			t.Errorf("[proto %d] Expected text %q, got %q", proto, msg, parsed.Text)
+		}
+
+		// 6. Verify that after reading the string NO extra bytes remain
+		if reader.Len() != 0 {
+			t.Errorf("[proto %d] Expected 0 extra bytes remaining, got %d", proto, reader.Len())
+		}
+	}
+}
+
+func TestBuildLoginDisconnectSpecialCharacters(t *testing.T) {
+	// Verify messages with quotes, backslashes, and accents are properly serialized
+	msg := `Mensaje con "comillas", barras \ y tildes: éxito!`
+	pkt := BuildLoginDisconnect(767, msg)
 
 	reader := bytes.NewReader(pkt)
 	pktLen, _, err := ReadVarInt(reader)
-	if err != nil {
-		t.Fatalf("Failed to read packet length: %v", err)
-	}
-	if int(pktLen) != reader.Len() {
-		t.Errorf("Packet length mismatch: declared %d, remaining %d", pktLen, reader.Len())
+	if err != nil || int(pktLen) != reader.Len() {
+		t.Fatalf("Packet length error: %v", err)
 	}
 
 	pktID, _, err := ReadVarInt(reader)
 	if err != nil || pktID != 0x00 {
-		t.Fatalf("Expected packet ID 0x00, got %d (err: %v)", pktID, err)
+		t.Fatalf("Packet ID error: %v", err)
 	}
 
-	// Verify NBT structure:
-	// 0x0A (TAG_Compound)
-	b, _ := reader.ReadByte()
-	if b != 0x0A {
-		t.Fatalf("Expected TAG_Compound (0x0A), got 0x%02X", b)
+	strLen, _, err := ReadVarInt(reader)
+	if err != nil {
+		t.Fatalf("String length error: %v", err)
 	}
 
-	// 0x08 (TAG_String)
-	b, _ = reader.ReadByte()
-	if b != 0x08 {
-		t.Fatalf("Expected TAG_String (0x08), got 0x%02X", b)
+	jsonBytes := make([]byte, strLen)
+	if _, err := io.ReadFull(reader, jsonBytes); err != nil {
+		t.Fatalf("Read string error: %v", err)
 	}
 
-	// name length: 4
-	var nameLen uint16
-	_ = binary.Read(reader, binary.BigEndian, &nameLen)
-	if nameLen != 4 {
-		t.Fatalf("Expected name length 4, got %d", nameLen)
+	var parsed struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(jsonBytes, &parsed); err != nil {
+		t.Fatalf("Failed unmarshaling JSON with special characters: %v (raw: %s)", err, string(jsonBytes))
+	}
+	if parsed.Text != msg {
+		t.Errorf("Expected %q, got %q", msg, parsed.Text)
 	}
 
-	nameBuf := make([]byte, 4)
-	_, _ = reader.Read(nameBuf)
-	if string(nameBuf) != "text" {
-		t.Fatalf("Expected name 'text', got %q", string(nameBuf))
-	}
-
-	// value length
-	var valLen uint16
-	_ = binary.Read(reader, binary.BigEndian, &valLen)
-	if int(valLen) != len([]byte(msg)) {
-		t.Fatalf("Expected value length %d, got %d", len([]byte(msg)), valLen)
-	}
-
-	valBuf := make([]byte, valLen)
-	_, _ = reader.Read(valBuf)
-	if string(valBuf) != msg {
-		t.Fatalf("Expected message %q, got %q", msg, string(valBuf))
-	}
-
-	// 0x00 (TAG_End)
-	b, _ = reader.ReadByte()
-	if b != 0x00 {
-		t.Fatalf("Expected TAG_End (0x00), got 0x%02X", b)
-	}
-
-	// Reader should now be exhausted
 	if reader.Len() != 0 {
 		t.Errorf("Expected 0 bytes left, got %d", reader.Len())
 	}
