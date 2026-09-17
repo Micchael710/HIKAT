@@ -185,7 +185,7 @@ func handleConnection(clientConn net.Conn, backend *BackendClient, sem chan stru
 		if intent == "LOGIN" {
 			disconnectMsg := "El servidor no está disponible en este momento."
 			pkt := BuildLoginDisconnect(hs.ProtocolVersion, disconnectMsg)
-			_, _ = clientConn.Write(pkt)
+			sendLoginDisconnect(clientConn, pkt)
 		}
 		return
 	}
@@ -227,12 +227,12 @@ func handleLogin(clientConn net.Conn, hs *Handshake, resp *ConnectResponse) {
 	case "STARTED":
 		msg := "El servidor se acaba de iniciar. Inténtalo nuevamente en unos segundos."
 		pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
-		_, _ = clientConn.Write(pkt)
+		sendLoginDisconnect(clientConn, pkt)
 
 	case "STARTING":
 		msg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
 		pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
-		_, _ = clientConn.Write(pkt)
+		sendLoginDisconnect(clientConn, pkt)
 
 	case "ONLINE":
 		targetAddr := fmt.Sprintf("%s:%d", resp.TargetHost, resp.TargetPort)
@@ -242,7 +242,7 @@ func handleLogin(clientConn net.Conn, hs *Handshake, resp *ConnectResponse) {
 			log.Printf("[Proxy] Online target %s not reachable yet, treating as STARTING: %v", targetAddr, err)
 			msg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
 			pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
-			_, _ = clientConn.Write(pkt)
+			sendLoginDisconnect(clientConn, pkt)
 			return
 		}
 		defer targetConn.Close()
@@ -258,8 +258,33 @@ func handleLogin(clientConn net.Conn, hs *Handshake, resp *ConnectResponse) {
 	default: // "UNAVAILABLE" or any unexpected status
 		msg := "El servidor no está disponible en este momento."
 		pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
-		_, _ = clientConn.Write(pkt)
+		sendLoginDisconnect(clientConn, pkt)
 	}
+}
+
+// sendLoginDisconnect writes the disconnect packet with a write deadline,
+// issues a half-close (CloseWrite) to send a FIN, drains any pending pipelined
+// client bytes up to a short 500ms read deadline, and returns cleanly.
+// This prevents RST packets caused by closing sockets with unread data in the receive buffer.
+func sendLoginDisconnect(conn net.Conn, packet []byte) {
+	_ = conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
+
+	for len(packet) > 0 {
+		n, err := conn.Write(packet)
+		if err != nil {
+			return
+		}
+		packet = packet[n:]
+	}
+
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		_ = tcpConn.CloseWrite()
+	} else if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+		_ = cw.CloseWrite()
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	_, _ = io.Copy(io.Discard, conn)
 }
 
 // pipe provides bidirectional streaming between client and target connections.

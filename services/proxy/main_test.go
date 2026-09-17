@@ -390,3 +390,84 @@ func TestGracefulShutdown(t *testing.T) {
 		t.Fatal("Accept loop did not exit promptly on shutdown")
 	}
 }
+
+func TestSendLoginDisconnectCleanClose(t *testing.T) {
+	// 1. Create real localhost TCP listener
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	msg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
+	disconnectPkt := BuildLoginDisconnect(765, msg)
+
+	serverDone := make(chan struct{})
+	var serverDuration time.Duration
+
+	go func() {
+		defer close(serverDone)
+		conn, aErr := listener.Accept()
+		if aErr != nil {
+			return
+		}
+		defer conn.Close()
+
+		start := time.Now()
+		sendLoginDisconnect(conn, disconnectPkt)
+		serverDuration = time.Since(start)
+	}()
+
+	// 2. Connect client to listener
+	clientConn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("Failed to dial server: %v", err)
+	}
+	defer clientConn.Close()
+
+	// 3. Client sends pipelined extra bytes (simulating Login Start sent after Handshake)
+	handshake := buildRawHandshake(765, "play-meliora.hikat.org", 25565, 2)
+	loginStart := []byte{0x0b, 0x00, 0x09, 'P', 'l', 'a', 'y', 'e', 'r', '1', '2', '3'}
+	pipelinedData := append(handshake, loginStart...)
+
+	if _, err := clientConn.Write(pipelinedData); err != nil {
+		t.Fatalf("Failed to write pipelined data: %v", err)
+	}
+
+	// 4. Client reads full disconnect packet until EOF
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var received bytes.Buffer
+	buf := make([]byte, 256)
+	var readErr error
+
+	for {
+		n, rErr := clientConn.Read(buf)
+		if n > 0 {
+			received.Write(buf[:n])
+		}
+		if rErr != nil {
+			readErr = rErr
+			break
+		}
+	}
+
+	// 5. Verify connection terminated with clean EOF, not Connection Reset
+	if readErr != io.EOF {
+		t.Fatalf("Expected connection to terminate cleanly with EOF, got error: %v", readErr)
+	}
+
+	// 6. Verify client received complete Disconnect packet
+	if !bytes.Equal(received.Bytes(), disconnectPkt) {
+		t.Fatalf("Received bytes mismatch: got %d bytes, expected %d bytes", received.Len(), len(disconnectPkt))
+	}
+
+	// 7. Verify helper finished within expected short timeout (< 1.5s)
+	select {
+	case <-serverDone:
+		if serverDuration > 1500*time.Millisecond {
+			t.Errorf("sendLoginDisconnect took unexpectedly long: %v", serverDuration)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timeout waiting for server to complete sendLoginDisconnect")
+	}
+}
