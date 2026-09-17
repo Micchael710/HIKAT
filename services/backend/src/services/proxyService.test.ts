@@ -532,6 +532,80 @@ describe("Proxy Service & Internal Endpoints Suite (Phase 1)", () => {
       expect(mockClient.sendPowerAction).not.toHaveBeenCalled()
     })
 
+    it("handles intent: 'LOGIN' when server is STOPPING (does not call START and returns STOPPING)", async () => {
+      const { db } = createMockD1()
+      const env = createMockEnv()
+
+      await db.insert(schema.servers).values({
+        id: "server-meliora",
+        name: "Meliora",
+        provisioningStatus: "READY",
+        pterodactylServerId: "10",
+        pterodactylIdentifier: "ptero-ident",
+      })
+
+      ;(mockClient.getServerResources as any).mockResolvedValueOnce({
+        object: "stats",
+        attributes: {
+          current_state: "stopping",
+          is_suspended: false,
+          resources: { memory_bytes: 1000, cpu_absolute: 50, disk_bytes: 100, network_rx_bytes: 0, network_tx_bytes: 0, uptime: 10 },
+        },
+      })
+
+      const req = new Request("http://localhost/internal/proxy/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer super-secure-proxy-secret-123",
+        },
+        body: JSON.stringify({ hostname: "play-meliora.hikat.org", intent: "LOGIN" }),
+      })
+
+      const res = await handleProxyConnect(req, env, db, mockClient)
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as any
+      expect(data.status).toBe("STOPPING")
+      expect(mockClient.sendPowerAction).not.toHaveBeenCalled()
+    })
+
+    it("handles intent: 'STATUS' when server is STOPPING (responds STOPPING and does not call START)", async () => {
+      const { db } = createMockD1()
+      const env = createMockEnv()
+
+      await db.insert(schema.servers).values({
+        id: "server-meliora",
+        name: "Meliora",
+        provisioningStatus: "READY",
+        pterodactylServerId: "10",
+        pterodactylIdentifier: "ptero-ident",
+      })
+
+      ;(mockClient.getServerResources as any).mockResolvedValueOnce({
+        object: "stats",
+        attributes: {
+          current_state: "stopping",
+          is_suspended: false,
+          resources: { memory_bytes: 1000, cpu_absolute: 50, disk_bytes: 100, network_rx_bytes: 0, network_tx_bytes: 0, uptime: 10 },
+        },
+      })
+
+      const req = new Request("http://localhost/internal/proxy/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer super-secure-proxy-secret-123",
+        },
+        body: JSON.stringify({ hostname: "play-meliora.hikat.org", intent: "STATUS" }),
+      })
+
+      const res = await handleProxyConnect(req, env, db, mockClient)
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as any
+      expect(data.status).toBe("STOPPING")
+      expect(mockClient.sendPowerAction).not.toHaveBeenCalled()
+    })
+
     it("supports concurrent wake requests with best-effort idempotent semantics", async () => {
       const { db } = createMockD1()
       const env = createMockEnv()

@@ -234,6 +234,11 @@ func handleLogin(clientConn net.Conn, hs *Handshake, resp *ConnectResponse) {
 		pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
 		sendLoginDisconnect(clientConn, pkt)
 
+	case "STOPPING":
+		msg := "El servidor se está apagando. Inténtalo nuevamente en unos segundos."
+		pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
+		sendLoginDisconnect(clientConn, pkt)
+
 	case "ONLINE":
 		targetAddr := fmt.Sprintf("%s:%d", resp.TargetHost, resp.TargetPort)
 		targetConn, err := net.DialTimeout("tcp", targetAddr, TargetDialTimeout)

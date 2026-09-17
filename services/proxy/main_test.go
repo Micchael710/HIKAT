@@ -254,6 +254,86 @@ func TestFlowLoginStarting(t *testing.T) {
 	}
 }
 
+func TestFlowLoginStopping(t *testing.T) {
+	// Mock target server to verify proxy does NOT attempt to connect to it
+	targetListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to start target listener: %v", err)
+	}
+	defer targetListener.Close()
+
+	targetConnected := make(chan struct{}, 1)
+	go func() {
+		conn, err := targetListener.Accept()
+		if err == nil {
+			conn.Close()
+			targetConnected <- struct{}{}
+		}
+	}()
+
+	targetPort := parsePort(targetListener.Addr().String())
+
+	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ConnectResponse{
+			Status:     "STOPPING",
+			TargetHost: "127.0.0.1",
+			TargetPort: targetPort,
+		})
+	}))
+	defer backendServer.Close()
+
+	backend := NewBackendClient(backendServer.URL, "test-secret")
+
+	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to start proxy listener: %v", err)
+	}
+	defer proxyListener.Close()
+
+	sem := make(chan struct{}, 10)
+	go func() {
+		conn, err := proxyListener.Accept()
+		if err != nil {
+			return
+		}
+		sem <- struct{}{}
+		handleConnection(conn, backend, sem)
+	}()
+
+	clientConn, err := net.Dial("tcp", proxyListener.Addr().String())
+	if err != nil {
+		t.Fatalf("Failed to dial proxy: %v", err)
+	}
+	defer clientConn.Close()
+
+	rawHandshake := buildRawHandshake(765, "play-meliora.hikat.org", 25565, 2)
+	_, _ = clientConn.Write(rawHandshake)
+
+	buf := make([]byte, 512)
+	n, err := clientConn.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatalf("Failed to read login disconnect packet: %v", err)
+	}
+
+	if n == 0 {
+		t.Fatal("Expected disconnect packet, got 0 bytes")
+	}
+
+	expectedMsg := "El servidor se está apagando. Inténtalo nuevamente en unos segundos."
+	if !strings.Contains(string(buf[:n]), expectedMsg) {
+		t.Errorf("Disconnect packet does not contain expected message %q, got: %q", expectedMsg, string(buf[:n]))
+	}
+
+	// Verify target was not connected
+	select {
+	case <-targetConnected:
+		t.Error("Proxy unexpectedly connected to target server when status was STOPPING")
+	case <-time.After(100 * time.Millisecond):
+		// Expected: no connection to target
+	}
+}
+
 func TestFlowLoginOnlineButUnreachablePortTreatedAsStarting(t *testing.T) {
 	// Backend claims online, but target port is closed (server process still warming up)
 	backendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

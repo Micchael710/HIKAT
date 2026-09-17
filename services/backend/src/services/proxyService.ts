@@ -54,7 +54,7 @@ export interface ProxyConnectRequestBody {
 }
 
 export interface ProxyConnectResponse {
-  status: "STARTED" | "STARTING" | "ONLINE" | "OFFLINE" | "UNAVAILABLE"
+  status: "STARTED" | "STARTING" | "STOPPING" | "ONLINE" | "OFFLINE" | "UNAVAILABLE"
   targetHost?: string
   targetPort?: number
 }
@@ -231,6 +231,12 @@ export async function handleProxyConnect(
         headers: { "Content-Type": "application/json" },
       })
     }
+    if (currentStatus === "STOPPING") {
+      return new Response(JSON.stringify({ status: "STOPPING" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
     return new Response(JSON.stringify({ status: "UNAVAILABLE" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -247,6 +253,13 @@ export async function handleProxyConnect(
 
   if (currentStatus === "STARTING") {
     return new Response(JSON.stringify({ status: "STARTING" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })
+  }
+
+  if (currentStatus === "STOPPING") {
+    return new Response(JSON.stringify({ status: "STOPPING" }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     })
