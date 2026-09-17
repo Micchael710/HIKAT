@@ -16,5 +16,10 @@
   "command.hikat.whitelist.list.status_off": "HiKAT whitelist: disabled",
   "command.hikat.whitelist.list.count": "Players: %s",
   "command.hikat.whitelist.list.entry": "- %s",
-  "command.hikat.reload.success": "HiKAT server configuration reloaded."
+  "command.hikat.reload.success": "HiKAT server configuration reloaded.",
+
+  "The server is starting. Please try again in a few seconds.": "The server is starting. Please try again in a few seconds.",
+  "The server is shutting down. Please try again in a few seconds.": "The server is shutting down. Please try again in a few seconds.",
+  "The server is online, but is not accepting connections right now. Please try again in a few seconds.": "The server is online, but is not accepting connections right now. Please try again in a few seconds.",
+  "The server is not available right now.": "The server is not available right now."
 }

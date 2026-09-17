@@ -16,5 +16,10 @@
   "command.hikat.whitelist.list.status_off": "Liste blanche HiKAT : désactivée",
   "command.hikat.whitelist.list.count": "Joueurs : %s",
   "command.hikat.whitelist.list.entry": "- %s",
-  "command.hikat.reload.success": "Configuration du serveur HiKAT rechargée."
+  "command.hikat.reload.success": "Configuration du serveur HiKAT rechargée.",
+
+  "The server is starting. Please try again in a few seconds.": "Le serveur est en cours de démarrage. Réessayez dans quelques secondes.",
+  "The server is shutting down. Please try again in a few seconds.": "Le serveur est en cours d’arrêt. Réessayez dans quelques secondes.",
+  "The server is online, but is not accepting connections right now. Please try again in a few seconds.": "Le serveur est en ligne, mais n’accepte pas les connexions pour le moment. Réessayez dans quelques secondes.",
+  "The server is not available right now.": "Le serveur n’est pas disponible pour le moment."
 }

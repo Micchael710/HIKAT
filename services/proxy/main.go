@@ -183,8 +183,8 @@ func handleConnection(clientConn net.Conn, backend *BackendClient, sem chan stru
 	if err != nil {
 		log.Printf("[Proxy] Backend connect error for host %s (%s): %v", hs.CleanHostname, intent, err)
 		if intent == "LOGIN" {
-			disconnectMsg := "El servidor no está disponible en este momento."
-			pkt := BuildLoginDisconnect(hs.ProtocolVersion, disconnectMsg)
+			disconnectKey := "The server is not available right now."
+			pkt := BuildLoginDisconnectTranslation(hs.ProtocolVersion, disconnectKey)
 			sendLoginDisconnect(clientConn, pkt)
 		}
 		return
@@ -225,18 +225,15 @@ func handleStatusPing(clientConn net.Conn, hs *Handshake, resp *ConnectResponse)
 func handleLogin(clientConn net.Conn, hs *Handshake, resp *ConnectResponse) {
 	switch resp.Status {
 	case "STARTED":
-		msg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
-		pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
+		pkt := BuildLoginDisconnectTranslation(hs.ProtocolVersion, "The server is starting. Please try again in a few seconds.")
 		sendLoginDisconnect(clientConn, pkt)
 
 	case "STARTING":
-		msg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
-		pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
+		pkt := BuildLoginDisconnectTranslation(hs.ProtocolVersion, "The server is starting. Please try again in a few seconds.")
 		sendLoginDisconnect(clientConn, pkt)
 
 	case "STOPPING":
-		msg := "El servidor se está apagando. Inténtalo nuevamente en unos segundos."
-		pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
+		pkt := BuildLoginDisconnectTranslation(hs.ProtocolVersion, "The server is shutting down. Please try again in a few seconds.")
 		sendLoginDisconnect(clientConn, pkt)
 
 	case "ONLINE":
@@ -244,8 +241,7 @@ func handleLogin(clientConn net.Conn, hs *Handshake, resp *ConnectResponse) {
 		targetConn, err := net.DialTimeout("tcp", targetAddr, TargetDialTimeout)
 		if err != nil {
 			log.Printf("[Proxy] Online target %s is not accepting connections: %v", targetAddr, err)
-			msg := "El servidor está encendido, pero no está aceptando conexiones en este momento. Inténtalo nuevamente en unos segundos."
-			pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
+			pkt := BuildLoginDisconnectTranslation(hs.ProtocolVersion, "The server is online, but is not accepting connections right now. Please try again in a few seconds.")
 			sendLoginDisconnect(clientConn, pkt)
 			return
 		}
@@ -260,8 +256,7 @@ func handleLogin(clientConn net.Conn, hs *Handshake, resp *ConnectResponse) {
 		pipe(clientConn, targetConn)
 
 	default: // "UNAVAILABLE" or any unexpected status
-		msg := "El servidor no está disponible en este momento."
-		pkt := BuildLoginDisconnect(hs.ProtocolVersion, msg)
+		pkt := BuildLoginDisconnectTranslation(hs.ProtocolVersion, "The server is not available right now.")
 		sendLoginDisconnect(clientConn, pkt)
 	}
 }

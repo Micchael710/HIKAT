@@ -31,7 +31,11 @@ public class TranslationAssetsTest {
         "command.hikat.whitelist.list.status_off",
         "command.hikat.whitelist.list.count",
         "command.hikat.whitelist.list.entry",
-        "command.hikat.reload.success"
+        "command.hikat.reload.success",
+        "The server is starting. Please try again in a few seconds.",
+        "The server is shutting down. Please try again in a few seconds.",
+        "The server is online, but is not accepting connections right now. Please try again in a few seconds.",
+        "The server is not available right now."
     );
 
     private static final List<String> LOCALES = List.of(
@@ -44,7 +48,7 @@ public class TranslationAssetsTest {
         // French
         "fr_fr", "fr_ca"
     );
-    private static final Pattern ENTRY_PATTERN = Pattern.compile("\"([a-zA-Z0-9._]+)\"\\s*:\\s*\"([^\"]*)\"");
+    private static final Pattern ENTRY_PATTERN = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)\"");
 
     @Test
     public void testAllLocalesExistAndHaveAllRequiredKeysWithoutTechnicalLeaks() throws Exception {

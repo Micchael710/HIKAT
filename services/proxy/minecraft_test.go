@@ -334,3 +334,71 @@ func TestCleanHostnameEdgeCases(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildLoginDisconnectTranslation(t *testing.T) {
+	protocols := []int{47, 340, 498, 754, 765, 767}
+	keys := []string{
+		"The server is starting. Please try again in a few seconds.",
+		"The server is shutting down. Please try again in a few seconds.",
+		"The server is online, but is not accepting connections right now. Please try again in a few seconds.",
+		"The server is not available right now.",
+	}
+
+	for _, proto := range protocols {
+		for _, key := range keys {
+			pkt := BuildLoginDisconnectTranslation(proto, key)
+
+			reader := bytes.NewReader(pkt)
+
+			// 1. Packet length VarInt
+			pktLen, _, err := ReadVarInt(reader)
+			if err != nil {
+				t.Fatalf("[proto %d, key %q] Failed to read packet length: %v", proto, key, err)
+			}
+			if int(pktLen) != reader.Len() {
+				t.Errorf("[proto %d, key %q] Packet length mismatch: declared %d, remaining %d", proto, key, pktLen, reader.Len())
+			}
+
+			// 2. Packet ID 0x00
+			pktID, _, err := ReadVarInt(reader)
+			if err != nil || pktID != 0x00 {
+				t.Fatalf("[proto %d, key %q] Expected packet ID 0x00, got %d (err: %v)", proto, key, pktID, err)
+			}
+
+			// 3. String length VarInt
+			strLen, _, err := ReadVarInt(reader)
+			if err != nil {
+				t.Fatalf("[proto %d, key %q] Failed to read string length: %v", proto, key, err)
+			}
+
+			// 4. JSON bytes
+			jsonBytes := make([]byte, strLen)
+			if _, err := io.ReadFull(reader, jsonBytes); err != nil {
+				t.Fatalf("[proto %d, key %q] Failed to read JSON bytes: %v", proto, key, err)
+			}
+
+			// 5. Valid JSON with translate present and text absent
+			var rawMap map[string]interface{}
+			if err := json.Unmarshal(jsonBytes, &rawMap); err != nil {
+				t.Fatalf("[proto %d, key %q] Invalid JSON: %v, raw: %s", proto, key, err, string(jsonBytes))
+			}
+
+			if _, hasText := rawMap["text"]; hasText {
+				t.Errorf("[proto %d, key %q] Field 'text' must be absent, got %v", proto, key, rawMap["text"])
+			}
+
+			translateVal, hasTranslate := rawMap["translate"]
+			if !hasTranslate {
+				t.Errorf("[proto %d, key %q] Field 'translate' must be present", proto, key)
+			} else if translateVal != key {
+				t.Errorf("[proto %d, key %q] Expected translate %q, got %q", proto, key, key, translateVal)
+			}
+
+			// 6. No trailing bytes
+			if reader.Len() != 0 {
+				t.Errorf("[proto %d, key %q] Expected 0 trailing bytes, got %d", proto, key, reader.Len())
+			}
+		}
+	}
+}
+

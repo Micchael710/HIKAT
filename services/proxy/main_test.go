@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 )
@@ -18,6 +17,32 @@ func parsePort(addr string) int {
 	_, portStr, _ := net.SplitHostPort(addr)
 	p, _ := strconv.Atoi(portStr)
 	return p
+}
+
+func parseDisconnectJSON(t *testing.T, pkt []byte) map[string]interface{} {
+	t.Helper()
+	reader := bytes.NewReader(pkt)
+	_, _, err := ReadVarInt(reader)
+	if err != nil {
+		t.Fatalf("Failed to read packet length: %v", err)
+	}
+	pktID, _, err := ReadVarInt(reader)
+	if err != nil || pktID != 0x00 {
+		t.Fatalf("Expected packet ID 0x00, got %d (err: %v)", pktID, err)
+	}
+	strLen, _, err := ReadVarInt(reader)
+	if err != nil {
+		t.Fatalf("Failed to read string length: %v", err)
+	}
+	jsonBytes := make([]byte, strLen)
+	if _, err := io.ReadFull(reader, jsonBytes); err != nil {
+		t.Fatalf("Failed to read JSON bytes: %v", err)
+	}
+	var res map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &res); err != nil {
+		t.Fatalf("Failed to unmarshal disconnect JSON: %v (raw: %s)", err, string(jsonBytes))
+	}
+	return res
 }
 
 func TestFlowStatusPingOnline(t *testing.T) {
@@ -197,10 +222,13 @@ func TestFlowLoginStarted(t *testing.T) {
 		t.Fatal("Expected disconnect packet, got 0 bytes")
 	}
 
-	// Contains the started message
-	expectedMsg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
-	if !strings.Contains(string(buf[:n]), expectedMsg) {
-		t.Errorf("Disconnect packet does not contain started message: %q", string(buf[:n]))
+	expectedKey := "The server is starting. Please try again in a few seconds."
+	data := parseDisconnectJSON(t, buf[:n])
+	if data["translate"] != expectedKey {
+		t.Errorf("Expected translate key %q, got %v", expectedKey, data["translate"])
+	}
+	if _, hasText := data["text"]; hasText {
+		t.Errorf("Field 'text' must not be present in disconnect JSON, got %v", data["text"])
 	}
 }
 
@@ -250,9 +278,13 @@ func TestFlowLoginStarting(t *testing.T) {
 		t.Fatal("Expected disconnect packet, got 0 bytes")
 	}
 
-	expectedMsg := "El servidor se está iniciando. Inténtalo nuevamente en unos segundos."
-	if !strings.Contains(string(buf[:n]), expectedMsg) {
-		t.Errorf("Disconnect packet does not contain starting message: %q", string(buf[:n]))
+	expectedKey := "The server is starting. Please try again in a few seconds."
+	dataStarting := parseDisconnectJSON(t, buf[:n])
+	if dataStarting["translate"] != expectedKey {
+		t.Errorf("Expected translate key %q, got %v", expectedKey, dataStarting["translate"])
+	}
+	if _, hasText := dataStarting["text"]; hasText {
+		t.Errorf("Field 'text' must not be present in disconnect JSON, got %v", dataStarting["text"])
 	}
 }
 
@@ -322,9 +354,13 @@ func TestFlowLoginStopping(t *testing.T) {
 		t.Fatal("Expected disconnect packet, got 0 bytes")
 	}
 
-	expectedMsg := "El servidor se está apagando. Inténtalo nuevamente en unos segundos."
-	if !strings.Contains(string(buf[:n]), expectedMsg) {
-		t.Errorf("Disconnect packet does not contain expected message %q, got: %q", expectedMsg, string(buf[:n]))
+	expectedKey := "The server is shutting down. Please try again in a few seconds."
+	data := parseDisconnectJSON(t, buf[:n])
+	if data["translate"] != expectedKey {
+		t.Errorf("Expected translate key %q, got %v", expectedKey, data["translate"])
+	}
+	if _, hasText := data["text"]; hasText {
+		t.Errorf("Field 'text' must not be present in disconnect JSON, got %v", data["text"])
 	}
 
 	// Verify target was not connected
@@ -386,14 +422,13 @@ func TestFlowLoginOnlineTargetInaccessible(t *testing.T) {
 		t.Fatal("Expected disconnect packet, got 0 bytes")
 	}
 
-	expectedMsg := "El servidor está encendido, pero no está aceptando conexiones en este momento. Inténtalo nuevamente en unos segundos."
-	if !strings.Contains(string(buf[:n]), expectedMsg) {
-		t.Errorf("Expected disconnect packet to contain %q, got: %q", expectedMsg, string(buf[:n]))
+	expectedKey := "The server is online, but is not accepting connections right now. Please try again in a few seconds."
+	data := parseDisconnectJSON(t, buf[:n])
+	if data["translate"] != expectedKey {
+		t.Errorf("Expected translate key %q, got %v", expectedKey, data["translate"])
 	}
-
-	// Must NOT state STARTING
-	if strings.Contains(string(buf[:n]), "El servidor se está iniciando") {
-		t.Errorf("Did not expect message to claim STARTING, got: %q", string(buf[:n]))
+	if _, hasText := data["text"]; hasText {
+		t.Errorf("Field 'text' must not be present in disconnect JSON, got %v", data["text"])
 	}
 
 	// Must NOT make additional calls to Backend (no wake, no polling)
@@ -444,8 +479,66 @@ func TestFlowLoginUnavailable(t *testing.T) {
 		t.Fatalf("Failed to read login disconnect packet: %v", err)
 	}
 
-	if !strings.Contains(string(buf[:n]), "El servidor no está disponible en este momento") {
-		t.Errorf("Expected unavailable message, got %q", string(buf[:n]))
+	if n == 0 {
+		t.Fatal("Expected disconnect packet, got 0 bytes")
+	}
+
+	expectedKey := "The server is not available right now."
+	data := parseDisconnectJSON(t, buf[:n])
+	if data["translate"] != expectedKey {
+		t.Errorf("Expected translate key %q, got %v", expectedKey, data["translate"])
+	}
+	if _, hasText := data["text"]; hasText {
+		t.Errorf("Field 'text' must not be present in disconnect JSON, got %v", data["text"])
+	}
+}
+
+func TestFlowLoginBackendError(t *testing.T) {
+	// Backend is down / unreachable
+	backend := NewBackendClient("http://127.0.0.1:64998", "test-secret")
+
+	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to start proxy listener: %v", err)
+	}
+	defer proxyListener.Close()
+
+	sem := make(chan struct{}, 10)
+	go func() {
+		conn, err := proxyListener.Accept()
+		if err != nil {
+			return
+		}
+		sem <- struct{}{}
+		handleConnection(conn, backend, sem)
+	}()
+
+	clientConn, err := net.Dial("tcp", proxyListener.Addr().String())
+	if err != nil {
+		t.Fatalf("Failed to dial proxy: %v", err)
+	}
+	defer clientConn.Close()
+
+	rawHandshake := buildRawHandshake(764, "play-meliora.hikat.org", 25565, 2)
+	_, _ = clientConn.Write(rawHandshake)
+
+	buf := make([]byte, 512)
+	n, err := clientConn.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatalf("Failed to read login disconnect packet: %v", err)
+	}
+
+	if n == 0 {
+		t.Fatal("Expected disconnect packet, got 0 bytes")
+	}
+
+	expectedKey := "The server is not available right now."
+	data := parseDisconnectJSON(t, buf[:n])
+	if data["translate"] != expectedKey {
+		t.Errorf("Expected translate key %q, got %v", expectedKey, data["translate"])
+	}
+	if _, hasText := data["text"]; hasText {
+		t.Errorf("Field 'text' must not be present in disconnect JSON, got %v", data["text"])
 	}
 }
 

@@ -162,15 +162,7 @@ func ReadHandshake(r io.Reader) (*Handshake, error) {
 	}, nil
 }
 
-// BuildLoginDisconnect generates the Minecraft Login Disconnect packet (Packet ID 0x00).
-// In Minecraft Java (all supported versions 1.7 through 1.21+), ClientboundLoginDisconnectPacket
-// body consists of a single Minecraft String containing the JSON Text Component.
-func BuildLoginDisconnect(protocolVersion int, message string) []byte {
-	jsonBytes, err := json.Marshal(map[string]string{"text": message})
-	if err != nil {
-		jsonBytes = []byte(fmt.Sprintf(`{"text":%q}`, message))
-	}
-
+func buildLoginDisconnectFromJSON(jsonBytes []byte) []byte {
 	lenVarInt := EncodeVarInt(int32(len(jsonBytes)))
 
 	body := make([]byte, 0, len(lenVarInt)+len(jsonBytes))
@@ -185,4 +177,27 @@ func BuildLoginDisconnect(protocolVersion int, message string) []byte {
 
 	fullPacket := append(packetLength, packetPayload...)
 	return fullPacket
+}
+
+// BuildLoginDisconnect generates the Minecraft Login Disconnect packet (Packet ID 0x00).
+// In Minecraft Java (all supported versions 1.7 through 1.21+), ClientboundLoginDisconnectPacket
+// body consists of a single Minecraft String containing the JSON Text Component.
+func BuildLoginDisconnect(protocolVersion int, message string) []byte {
+	jsonBytes, err := json.Marshal(map[string]string{"text": message})
+	if err != nil {
+		jsonBytes = []byte(fmt.Sprintf(`{"text":%q}`, message))
+	}
+	return buildLoginDisconnectFromJSON(jsonBytes)
+}
+
+// BuildLoginDisconnectTranslation generates a Minecraft Login Disconnect packet (Packet ID 0x00)
+// using a Translation Component: {"translate":"<translationKey>"}.
+// If the client has the HiKAT mod installed and configured for a supported language, it will
+// translate the key; if not, Minecraft falls back to displaying the key itself.
+func BuildLoginDisconnectTranslation(protocolVersion int, translationKey string) []byte {
+	jsonBytes, err := json.Marshal(map[string]string{"translate": translationKey})
+	if err != nil {
+		jsonBytes = []byte(fmt.Sprintf(`{"translate":%q}`, translationKey))
+	}
+	return buildLoginDisconnectFromJSON(jsonBytes)
 }
