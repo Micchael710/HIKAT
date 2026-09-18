@@ -218,6 +218,36 @@ public class HiKatMod {
     public static class ClientEvents {
         @SubscribeEvent
         public static void onLoggingIn(ClientPlayerNetworkEvent.LoggingIn event) {
+            var player = event.getPlayer();
+            var connection = player.connection;
+
+            System.out.println("[HiKAT DEBUG] player UUID = " + player.getUUID());
+
+            System.out.println(
+                "[HiKAT DEBUG] player GameProfile UUID = "
+                + player.getGameProfile().getId()
+            );
+
+            System.out.println(
+                "[HiKAT DEBUG] localGameProfile UUID = "
+                + connection.getLocalGameProfile().getId()
+            );
+
+            var info = connection.getListedOnlinePlayers().stream()
+                .filter(p -> "vBrayan06".equalsIgnoreCase(p.getProfile().getName()))
+                .findFirst()
+                .orElse(null);
+
+            System.out.println(
+                "[HiKAT DEBUG] PlayerInfo UUID = "
+                + (info != null ? info.getProfile().getId() : "NULL")
+            );
+
+            System.out.println(
+                "[HiKAT DEBUG] PlayerInfo name = "
+                + (info != null ? info.getProfile().getName() : "NULL")
+            );
+
             if (clientSnapshot != null) {
                 try {
                     Path gameDir = FMLPaths.GAMEDIR.get();
