@@ -487,8 +487,6 @@ async function processPendingGameRemovals() {
   }
 }
 
-void processPendingGameRemovals()
-
 function setupInstanceWatcher(gameId = null, targetInstanceRoot = instanceRoot) {
   const key = gameId || "__legacy__"
   const root = targetInstanceRoot || instanceRoot
@@ -1827,6 +1825,10 @@ function startOAuthLoopbackServer() {
         </body>
       </html>
     `)
+  })
+
+  oauthLoopbackServer.on("error", (err) => {
+    console.warn("[OAuth Loopback] Server error (e.g. port already in use):", err?.message)
   })
 
   oauthLoopbackServer.listen(
@@ -3348,6 +3350,7 @@ ipcMain.handle("game-get-runtime-info", async (_event, payload = {}) => {
 app.whenReady().then(() => {
   startOAuthLoopbackServer()
   setupInstanceWatcher()
+  void processPendingGameRemovals()
 
   createSplashWindow()
   createWindow()
@@ -3411,6 +3414,12 @@ function resetDownloadQueueForTesting() {
   dirtyGameIds.clear()
   pendingGameRemovals.clear()
   isProcessingRemovals = false
+  if (oauthLoopbackServer) {
+    try {
+      oauthLoopbackServer.close()
+    } catch (_) { }
+    oauthLoopbackServer = null
+  }
   if (gameLauncher) {
     gameLauncher.runningGameId = null
     gameLauncher.setStatus("idle")

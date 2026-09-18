@@ -13,6 +13,8 @@ let activeUserDataDir = ""
 let activeAppDataDir = ""
 const lastSentEvents: { channel: string; args: any[] }[] = []
 
+const whenReadyCallbacks: Function[] = []
+
 const electronMock = {
   app: {
     requestSingleInstanceLock: vi.fn().mockReturnValue(true),
@@ -25,7 +27,12 @@ const electronMock = {
     setAsDefaultProtocolClient: vi.fn(),
     on: vi.fn(),
     quit: vi.fn(),
-    whenReady: vi.fn().mockReturnValue(new Promise(() => {})),
+    whenReady: vi.fn(() => ({
+      then: (cb: Function) => {
+        whenReadyCallbacks.push(cb)
+        return Promise.resolve()
+      },
+    })),
   },
   BrowserWindow: function BrowserWindowMock() {
     return {
@@ -267,7 +274,7 @@ describe("Electron Main Game Removal Safety Suite", () => {
     await fsp.writeFile(path.join(ctx.instanceRoot, "options.txt"), "difficulty=2", "utf8")
     expect(fs.existsSync(ctx.instanceRoot)).toBe(true)
 
-    // Simular archivo persistente previo con server-6 en pendingRemovals
+    // 1. Simular archivo persistente previo con server-6 en pendingRemovals
     const queueFile = path.join(activeUserDataDir, "download-queue.json")
     const persistedState = {
       active: null,
@@ -281,18 +288,23 @@ describe("Electron Main Game Removal Safety Suite", () => {
     }
     await fsp.writeFile(queueFile, JSON.stringify(persistedState, null, 2), "utf8")
 
-    // Al arrancar el Launcher
+    // 2. Al arrancar el Launcher, se restaura el estado persistente
     loadPersistentDownloadQueue()
     expect(getPendingGameRemovals().has("server-6")).toBe(true)
+    // Antes de que Electron complete la inicialización, la carpeta todavía existe
+    expect(fs.existsSync(ctx.instanceRoot)).toBe(true)
 
-    // Procesa remociones pendientes al iniciar
-    await processPendingGameRemovals()
+    // 3. Al completar la inicialización de Electron (app.whenReady), se ejecuta automáticamente el procesamiento inicial
+    expect(whenReadyCallbacks.length).toBeGreaterThan(0)
+    await whenReadyCallbacks[0]()
+    // Esperar a que el proceso termine
+    await new Promise((r) => setTimeout(r, 100))
 
-    // Carpeta borrada y removido de pendientes
+    // 4. Carpeta borrada y removido de pendientes sin haber llamado manualmente a processPendingGameRemovals()
     expect(fs.existsSync(ctx.instanceRoot)).toBe(false)
     expect(getPendingGameRemovals().has("server-6")).toBe(false)
 
-    // El archivo de persistencia queda actualizado
+    // 5. El archivo de persistencia queda actualizado
     const freshRaw = await fsp.readFile(queueFile, "utf8")
     const freshParsed = JSON.parse(freshRaw)
     expect(freshParsed.pendingRemovals).toEqual([])
