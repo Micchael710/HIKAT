@@ -112,6 +112,7 @@ const {
   savePersistentDownloadQueue,
   loadPersistentDownloadQueue,
   promoteQueuedSync,
+  runGameSync,
   setActiveOperationGameIdForTesting,
 } = require("../../electron/main.cjs")
 
@@ -297,7 +298,40 @@ describe("Electron Main Game Removal Safety Suite", () => {
     expect(freshParsed.pendingRemovals).toEqual([])
   })
 
-  it("7. Un juego con pendingRemoval nunca debe volver a iniciar una descarga/sync ni ser promovido", async () => {
+  it("7. Si un juego está en pendingGameRemovals, runGameSync() no inicia la operación y devuelve estado cancelado", async () => {
+    getPendingGameRemovals().set("server-cancel-barrier", {
+      gameId: "server-cancel-barrier",
+      gameName: "Barrier Test",
+    })
+
+    const ctx = resolveGameContext({ gameId: "server-cancel-barrier", gameName: "Barrier Test" })
+    const startSyncSpy = vi.spyOn(operationManager, "startSync")
+
+    const res = await runGameSync(ctx, { gameId: "server-cancel-barrier", gameName: "Barrier Test" })
+
+    expect(res).toEqual({ success: false, cancelled: true })
+    expect(startSyncSpy).not.toHaveBeenCalled()
+    expect(operationManager.getState()).toBe("IDLE")
+  })
+
+  it("8. Si un juego está en pendingGameRemovals, game-launch falla antes de intentar iniciar Minecraft", async () => {
+    getPendingGameRemovals().set("server-launch-blocked", {
+      gameId: "server-launch-blocked",
+      gameName: "Launch Blocked",
+    })
+
+    const launchSpy = vi.spyOn(operationManager, "launchGame")
+    const launchHandler = ipcHandlers.get("game-launch")
+    expect(launchHandler).toBeDefined()
+
+    await expect(
+      launchHandler!({}, { gameId: "server-launch-blocked", gameName: "Launch Blocked" })
+    ).rejects.toThrow("Cannot launch game: game is marked for removal.")
+
+    expect(launchSpy).not.toHaveBeenCalled()
+  })
+
+  it("9. Un juego con pendingRemoval nunca debe volver a iniciar una descarga/sync ni ser promovido", async () => {
     getPendingGameRemovals().set("server-7", {
       gameId: "server-7",
       gameName: "Server Locked",

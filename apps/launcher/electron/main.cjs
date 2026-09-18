@@ -2284,6 +2284,9 @@ async function processNextQueuedSync() {
 }
 
 async function runGameSync(ctx, payload) {
+  if (ctx.gameId && pendingGameRemovals.has(ctx.gameId)) {
+    return { success: false, cancelled: true }
+  }
   isRestoredUserPause = false
   pausedByUser = false
   currentProcessingItem = null
@@ -3169,6 +3172,10 @@ ipcMain.handle("game-write-session", async (_event, payload = {}) => {
 
 ipcMain.handle("game-launch", async (_event, options = {}) => {
   const ctx = resolveGameContext(options)
+
+  if (ctx.gameId && pendingGameRemovals.has(ctx.gameId)) {
+    throw new Error("Cannot launch game: game is marked for removal.")
+  }
 
   const opState = operationManager.getState()
   const opPhase = activeOperationSnapshot?.phase
