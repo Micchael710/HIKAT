@@ -15,10 +15,10 @@ import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
 import { createTestR2Bucket } from "../testUtils/mockR2"
 import worker from "../index"
+import { isValidUsername } from "@hikat/shared"
 import {
   handleMinecraftSkinServe,
   handleMinecraftCapeServe,
-  isValidMinecraftUsername,
 } from "./minecraftTextureService"
 import { setMyPlayerSkin, setMyActiveSkin } from "./skinService"
 import { addMyPlayerCape, setMyActiveCape } from "./capeService"
@@ -108,24 +108,25 @@ describe("HiKAT Minecraft Texture Service Suite (Custom Skin Loader Integration)
   // ==========================================
   // Username Validation Tests
   // ==========================================
-  describe("isValidMinecraftUsername", () => {
-    it("accepts valid Minecraft usernames", () => {
-      expect(isValidMinecraftUsername("Kirby")).toBe(true)
-      expect(isValidMinecraftUsername("kirby")).toBe(true)
-      expect(isValidMinecraftUsername("Steve_123")).toBe(true)
-      expect(isValidMinecraftUsername("a")).toBe(true)
-      expect(isValidMinecraftUsername("1234567890123456")).toBe(true)
-      expect(isValidMinecraftUsername("Player_One")).toBe(true)
+  describe("isValidUsername", () => {
+    it("accepts valid Minecraft usernames (3-16 alphanumeric or underscore)", () => {
+      expect(isValidUsername("Kirby")).toBe(true)
+      expect(isValidUsername("kirby")).toBe(true)
+      expect(isValidUsername("Steve_123")).toBe(true)
+      expect(isValidUsername("1234567890123456")).toBe(true)
+      expect(isValidUsername("Player_One")).toBe(true)
     })
 
-    it("rejects invalid usernames", () => {
-      expect(isValidMinecraftUsername("")).toBe(false)
-      expect(isValidMinecraftUsername("toolongusername12345678")).toBe(false) // > 16 chars
-      expect(isValidMinecraftUsername("Kirby!")).toBe(false)
-      expect(isValidMinecraftUsername("user-name")).toBe(false)
-      expect(isValidMinecraftUsername("user.name")).toBe(false)
-      expect(isValidMinecraftUsername("player name")).toBe(false)
-      expect(isValidMinecraftUsername("Kirby.png")).toBe(false)
+    it("rejects invalid usernames (empty, <3 chars, >16 chars, special characters)", () => {
+      expect(isValidUsername("")).toBe(false)
+      expect(isValidUsername("a")).toBe(false) // < 3 chars
+      expect(isValidUsername("ab")).toBe(false) // < 3 chars
+      expect(isValidUsername("toolongusername12345678")).toBe(false) // > 16 chars
+      expect(isValidUsername("Kirby!")).toBe(false)
+      expect(isValidUsername("user-name")).toBe(false)
+      expect(isValidUsername("user.name")).toBe(false)
+      expect(isValidUsername("player name")).toBe(false)
+      expect(isValidUsername("Kirby.png")).toBe(false)
     })
   })
 
@@ -283,6 +284,10 @@ describe("HiKAT Minecraft Texture Service Suite (Custom Skin Loader Integration)
     })
 
     it("7. Invalid username or missing .png returns 404", async () => {
+      // Too short (< 3 chars, e.g. "a")
+      const res0 = await worker.fetch(new Request("https://api.hikat.org/minecraft/skins/a.png"), env)
+      expect(res0.status).toBe(404)
+
       // Invalid characters
       const res1 = await worker.fetch(new Request("https://api.hikat.org/minecraft/skins/Invalid!Player.png"), env)
       expect(res1.status).toBe(404)

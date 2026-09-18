@@ -10,18 +10,12 @@
 
 import { sql } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
+import { isValidUsername } from "@hikat/shared"
 import type { Env } from "../types"
 import { getCorsHeaders } from "../cors"
 import { getMyActiveSkin } from "./skinService"
 import { getMyActiveCape } from "./capeService"
 import { getContentMediaById } from "./mediaService"
-
-/**
- * Validates a Minecraft username (1-16 characters, alphanumeric or underscore).
- */
-export function isValidMinecraftUsername(username: string): boolean {
-  return /^[a-zA-Z0-9_]{1,16}$/.test(username)
-}
 
 /**
  * Helper to fetch a PNG binary stream from R2 and serve it with no-store cache headers.
@@ -104,7 +98,7 @@ export async function handleMinecraftSkinServe(
     username = match?.[1] || ""
   }
 
-  if (!isValidMinecraftUsername(username)) {
+  if (!isValidUsername(username)) {
     return new Response(JSON.stringify({ error: "Invalid username or skin not found" }), {
       status: 404,
       headers: {
@@ -129,7 +123,7 @@ export async function handleMinecraftSkinServe(
   const user = await db
     .select({ id: schema.users.id, displayName: schema.users.displayName })
     .from(schema.users)
-    .where(sql`lower(${schema.users.displayName}) = lower(${username})`)
+    .where(sql`${schema.users.displayName} = ${username} COLLATE NOCASE`)
     .get()
 
   if (!user || !user.displayName) {
@@ -181,7 +175,7 @@ export async function handleMinecraftCapeServe(
     username = match?.[1] || ""
   }
 
-  if (!isValidMinecraftUsername(username)) {
+  if (!isValidUsername(username)) {
     return new Response(JSON.stringify({ error: "Invalid username or cape not found" }), {
       status: 404,
       headers: {
@@ -206,7 +200,7 @@ export async function handleMinecraftCapeServe(
   const user = await db
     .select({ id: schema.users.id, displayName: schema.users.displayName })
     .from(schema.users)
-    .where(sql`lower(${schema.users.displayName}) = lower(${username})`)
+    .where(sql`${schema.users.displayName} = ${username} COLLATE NOCASE`)
     .get()
 
   if (!user || !user.displayName) {
