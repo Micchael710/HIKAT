@@ -64,6 +64,12 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
     })
     vi.spyOn(gameService, "subscribeReleaseEvents").mockReturnValue(() => {})
     vi.spyOn(authService, "getGameToken").mockResolvedValue("mock-game-token")
+    vi.spyOn(authService, "getUser").mockReturnValue({
+      id: "user-default",
+      displayName: "vBrayan06",
+      username: "vBrayan06",
+      email: "test@hikat.org",
+    })
     vi.spyOn(gameService, "writeGameSession").mockResolvedValue({ success: true } as any)
   })
 
@@ -2006,6 +2012,119 @@ describe("Shard 8E & 8F: DownloadPlayButton Real Component Lifecycle & Canonical
       const toast = container.querySelector(".play-button-toast, .settings-live-toast")
       expect(toast).not.toBeNull()
       expect(toast?.textContent).toContain("Disk full")
+    })
+
+    it("4ca. When user has valid displayName ('vBrayan06'), launchGame receives playerName: 'vBrayan06'", async () => {
+      vi.spyOn(authService, "getUser").mockReturnValue({
+        id: "user-1",
+        displayName: "vBrayan06",
+        username: "vBrayan06",
+        email: "test@hikat.org",
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [],
+      })
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      await act(async () => {
+        btn.click()
+      })
+
+      expect(launchSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          playerName: "vBrayan06",
+        }),
+      )
+    })
+
+    it("4cb. When displayName has surrounding whitespace ('  vBrayan06  '), launchGame receives trimmed 'vBrayan06'", async () => {
+      vi.spyOn(authService, "getUser").mockReturnValue({
+        id: "user-1",
+        displayName: "  vBrayan06  ",
+        username: "vBrayan06",
+        email: "test@hikat.org",
+      })
+
+      vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        modLoader: "NEOFORGE",
+        installed: true,
+        hasUpdate: false,
+        hasIntegrityIssue: false,
+        installedModpackVersion: "1.0.0",
+        hasExistingInstall: true,
+        totalSizeGB: 1,
+        clientFiles: [],
+      })
+      const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+
+      const { container } = await mountButton()
+      const btn = container.querySelector("button") as HTMLElement
+      await act(async () => {
+        btn.click()
+      })
+
+      expect(launchSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          playerName: "vBrayan06",
+        }),
+      )
+    })
+
+    it("4cc. When user has no valid displayName (null, undefined, or empty string), launch is aborted, error toast is shown, and launchGame is NOT called", async () => {
+      const invalidCases = [
+        null,
+        { id: "u-1", displayName: null, username: "PlayerOne", email: "test@hikat.org" },
+        { id: "u-2", displayName: undefined, username: "PlayerOne", email: "test@hikat.org" },
+        { id: "u-3", displayName: "", username: "PlayerOne", email: "test@hikat.org" },
+        { id: "u-4", displayName: "   ", username: "PlayerOne", email: "test@hikat.org" },
+      ]
+
+      for (const invalidUser of invalidCases) {
+        vi.spyOn(authService, "getUser").mockReturnValue(invalidUser as any)
+        vi.spyOn(gameService, "checkGameManifest").mockResolvedValue({
+          version: "1.0.0",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          modLoader: "NEOFORGE",
+          installed: true,
+          hasUpdate: false,
+          hasIntegrityIssue: false,
+          installedModpackVersion: "1.0.0",
+          hasExistingInstall: true,
+          totalSizeGB: 1,
+          clientFiles: [],
+        })
+        const launchSpy = vi.spyOn(gameService, "launchGame").mockResolvedValue({ success: true } as any)
+
+        const { container, unmount } = await mountButton()
+        const btn = container.querySelector("button") as HTMLElement
+        await act(async () => {
+          btn.click()
+        })
+
+        // Must NOT launch Minecraft and must NOT fallback to "Player"
+        expect(launchSpy).not.toHaveBeenCalled()
+        const toast = container.querySelector(".play-button-toast, .settings-live-toast")
+        expect(toast).not.toBeNull()
+        expect(toast?.textContent).toContain("no se encontró un nombre de usuario válido")
+        unmount()
+      }
     })
 
     it("4d. When manifest is incomplete, obtains full manifest via ensureFullManifest, writes session.json, and launches game", async () => {

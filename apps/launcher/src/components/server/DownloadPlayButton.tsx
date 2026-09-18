@@ -1788,14 +1788,14 @@ export default function DownloadPlayButton({
         }
       }
 
-      let playerName = "Player"
-      try {
-        const userRaw = localStorage.getItem("hikat_user_data")
-        if (userRaw) {
-          const parsed = JSON.parse(userRaw)
-          if (parsed?.username) playerName = parsed.username
-        }
-      } catch (_) { }
+      const currentUser = authService.getUser()
+      const rawDisplayName = currentUser?.displayName
+      const playerName = typeof rawDisplayName === "string" ? rawDisplayName.trim() : ""
+
+      if (!playerName) {
+        showToast("No se pudo iniciar el juego: no se encontró un nombre de usuario válido.", "error")
+        return
+      }
 
       try {
         const gameToken = await authService.getGameToken()

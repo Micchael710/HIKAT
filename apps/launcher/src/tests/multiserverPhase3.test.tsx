@@ -116,6 +116,12 @@ describe("HiKAT Multi-Server Phase 3 Mandatory Regression Suite", () => {
     vi.restoreAllMocks()
     vi.spyOn(gameService, "subscribeReleaseEvents").mockReturnValue(() => {})
     vi.spyOn(gameService, "getPublishedModpack").mockResolvedValue(null)
+    vi.spyOn(authService, "getUser").mockReturnValue({
+      id: "u-test",
+      displayName: "vBrayan06",
+      username: "vBrayan06",
+      email: "test@hikat.org",
+    })
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hikat-phase3-test-"))
     container = document.createElement("div")
     document.body.appendChild(container)

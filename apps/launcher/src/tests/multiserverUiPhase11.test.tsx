@@ -141,6 +141,12 @@ describe("HiKAT Phase 11 — UI Robustness Suite: Items 15, 16, 17", () => {
       clientFiles: [],
     })
     vi.spyOn(gameService, "subscribeReleaseEvents").mockReturnValue(() => {})
+    vi.spyOn(authService, "getUser").mockReturnValue({
+      id: "u-test",
+      displayName: "vBrayan06",
+      username: "vBrayan06",
+      email: "test@hikat.org",
+    })
   })
 
   afterEach(() => {
@@ -1280,6 +1286,12 @@ describe("HiKAT Phase 11 — Lightweight Multiserver Navigation & Global Integri
       }),
       launchGame: vi.fn().mockResolvedValue({ success: true }),
     }
+    vi.spyOn(authService, "getUser").mockReturnValue({
+      id: "u-test",
+      displayName: "vBrayan06",
+      username: "vBrayan06",
+      email: "test@hikat.org",
+    })
   })
 
   afterEach(() => {
