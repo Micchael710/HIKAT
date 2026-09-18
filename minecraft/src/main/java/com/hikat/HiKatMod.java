@@ -7,12 +7,15 @@ import com.hikat.server.ConnectionGate;
 import com.hikat.server.GameTokenVerifier;
 import com.hikat.server.HiKatWhitelist;
 import com.hikat.server.IntegrityService;
+import com.hikat.server.mixin.ClientConfigurationPacketListenerImplAccessor;
+import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
 import java.io.IOException;
 import java.nio.file.Path;
+import net.minecraft.client.Minecraft;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -70,6 +73,21 @@ public class HiKatMod {
             (payload, context) -> {
                 context.enqueueWork(() -> {
                     try {
+                        GameProfile launcherProfile = Minecraft.getInstance().getGameProfile();
+
+                        if (context.listener() instanceof ClientConfigurationPacketListenerImplAccessor accessor) {
+                            GameProfile originalProfile = accessor.hikat$getLocalGameProfile();
+                            LOGGER.info("[HiKAT DEBUG] Configuration original profile UUID = {}", originalProfile != null ? originalProfile.getId() : "NULL");
+
+                            LOGGER.info("[HiKAT DEBUG] Launcher profile UUID = {}", launcherProfile != null ? launcherProfile.getId() : "NULL");
+
+                            if (launcherProfile != null) {
+                                accessor.hikat$setLocalGameProfile(launcherProfile);
+                                GameProfile correctedProfile = accessor.hikat$getLocalGameProfile();
+                                LOGGER.info("[HiKAT DEBUG] Configuration corrected profile UUID = {}", correctedProfile != null ? correctedProfile.getId() : "NULL");
+                            }
+                        }
+
                         Path gameDir = FMLPaths.GAMEDIR.get();
                         clientSnapshot = SessionReader.loadSnapshot(gameDir);
                         context.reply(new HiKatProtocol.AuthResponsePayload(

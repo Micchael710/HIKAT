@@ -7,7 +7,9 @@
   "server": [
     "ServerConfigurationPacketListenerImplAccessor"
   ],
-  "client": [],
+  "client": [
+    "ClientConfigurationPacketListenerImplAccessor"
+  ],
   "injectors": {
     "defaultRequire": 1
   }
