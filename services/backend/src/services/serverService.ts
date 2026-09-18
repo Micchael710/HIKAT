@@ -865,6 +865,18 @@ export async function deleteServer(
   } catch (err) {
     console.warn(`[ServerService] Failed notifying DO to unwatch server ${serverId}:`, err)
   }
+
+  // Broadcast SERVER_UPDATED via WebSocket (tolerant error handling)
+  try {
+    await broadcastServerUpdated(env, serverId)
+  } catch (err) {
+    console.error("[WebSocket Broadcast Error]", {
+      type: "SERVER_UPDATED",
+      serverId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+
   return true
 }
 

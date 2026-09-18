@@ -2052,9 +2052,38 @@ describe("ServerService & Multi-Server Provisioning", () => {
         deleteApplicationServer: vi.fn(),
       } as unknown as IPterodactylClient
 
+      const broadcastSpy = vi.spyOn(releaseEventsModule, "broadcastServerUpdated").mockResolvedValue()
+
       const res = await deleteServer(mockDb, mockEnv, serverId, false, deleteClient)
       expect(res).toBe(true)
       expect(deleteClient.deleteApplicationServer).not.toHaveBeenCalled()
+      expect(broadcastSpy).toHaveBeenCalledWith(mockEnv, serverId)
+
+      const check = await mockDb
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, serverId))
+        .get()
+      expect(check).toBeUndefined()
+    })
+
+    it("8b. deleteServer broadcasts SERVER_UPDATED and does not fail if broadcast throws", async () => {
+      const serverId = "srv-del-broadcast-fail"
+      await mockDb.insert(schema.servers).values({
+        id: serverId,
+        name: "Broadcast Fail Server",
+        minecraftVersion: "1.20.1",
+        modLoader: "VANILLA",
+        provisioningStatus: "READY",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+      const broadcastSpy = vi.spyOn(releaseEventsModule, "broadcastServerUpdated").mockRejectedValue(new Error("WS network drop"))
+
+      const res = await deleteServer(mockDb, mockEnv, serverId, false)
+      expect(res).toBe(true)
+      expect(broadcastSpy).toHaveBeenCalledWith(mockEnv, serverId)
 
       const check = await mockDb
         .select()

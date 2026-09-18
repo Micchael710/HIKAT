@@ -1028,6 +1028,300 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
 
     unmount()
   })
+
+  describe("Automatic Uninstall of Removed Servers (Phase 03)", () => {
+    let onPhaseChangeCb: any = null
+    let onLaunchStatusCb: any = null
+    let releaseEventsCb: any = null
+
+    beforeEach(() => {
+      vi.clearAllMocks()
+      window.localStorage.clear()
+
+      onPhaseChangeCb = null
+      onLaunchStatusCb = null
+      releaseEventsCb = null
+
+      ;(window as any).electronAPI = {
+        ...(window as any).electronAPI,
+        getInstalledState: vi.fn().mockResolvedValue(null),
+        getLaunchStatus: vi.fn().mockResolvedValue({
+          status: "idle",
+          operationState: "IDLE",
+          runningGameId: null,
+          activeOperationGameId: null,
+          activeOperationState: "IDLE",
+        }),
+        onPhaseChange: vi.fn((cb) => {
+          onPhaseChangeCb = cb
+          return () => {}
+        }),
+        onLaunchStatus: vi.fn((cb) => {
+          onLaunchStatusCb = cb
+          return () => {}
+        }),
+      }
+
+      vi.spyOn(authService, "subscribe").mockImplementation((cb: any) => {
+        cb({ user: { id: "u1", displayName: "Admin", role: "ADMIN" } }, "AUTHENTICATED")
+        return () => {}
+      })
+      vi.spyOn(authService, "bootstrap").mockResolvedValue(null)
+      vi.spyOn(authService, "getAccessToken").mockReturnValue("valid-token")
+
+      vi.spyOn(gameService, "subscribeReleaseEvents").mockImplementation((cb: any) => {
+        releaseEventsCb = cb
+        return () => {}
+      })
+    })
+
+    it("1 & 2. Server [A, B] -> [A]: B is detected as removed and uninstalled; A is NOT uninstalled", async () => {
+      const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+      const serverB = { id: "srv-b", name: "Bravo", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+
+      let currentServers = [serverA, serverB]
+      vi.spyOn(serverService, "getLauncherServers").mockImplementation(async () => currentServers as any)
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(result.current.servers).toHaveLength(2)
+      expect(uninstallSpy).not.toHaveBeenCalled()
+
+      // Simulate admin deleting server B: serverService returns [serverA]
+      currentServers = [serverA]
+
+      await act(async () => {
+        await result.current.refreshServers()
+      })
+
+      // 1. B is detected as removed and uninstalled
+      expect(uninstallSpy).toHaveBeenCalledWith({
+        gameId: "srv-b",
+        gameName: "Bravo",
+      })
+
+      // 2. Server A is NOT uninstalled
+      expect(uninstallSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({ gameId: "srv-a" })
+      )
+
+      // Servers state updated to [serverA]
+      expect(result.current.servers).toEqual([serverA])
+      // Orphan state for B removed
+      expect(result.current.gameStates["srv-b"]).toBeUndefined()
+      expect(result.current.gameStates["srv-a"]).toBeDefined()
+
+      unmount()
+    })
+
+    it("3. Server removed while Minecraft is running: postpones uninstall until status idle, then uninstalls once", async () => {
+      const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+      const serverB = { id: "srv-b", name: "Bravo", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+
+      let currentServers = [serverA, serverB]
+      vi.spyOn(serverService, "getLauncherServers").mockImplementation(async () => currentServers as any)
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(result.current.servers).toHaveLength(2)
+
+      // Minecraft for server B is running!
+      ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+        status: "running",
+        runningGameId: "srv-b",
+        operationState: "IDLE",
+      })
+
+      // Admin deletes server B
+      currentServers = [serverA]
+
+      await act(async () => {
+        await result.current.refreshServers()
+      })
+
+      // Disappears from UI immediately
+      expect(result.current.servers).toEqual([serverA])
+      expect(result.current.gameStates["srv-b"]).toBeUndefined()
+
+      // But NOT uninstalled yet because Minecraft is running
+      expect(uninstallSpy).not.toHaveBeenCalled()
+
+      // Now Minecraft stops running
+      ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+        status: "idle",
+        runningGameId: null,
+        operationState: "IDLE",
+      })
+
+      await act(async () => {
+        onLaunchStatusCb?.("idle", { gameId: "srv-b" })
+        await Promise.resolve()
+      })
+
+      // Uninstalled exactly once
+      expect(uninstallSpy).toHaveBeenCalledTimes(1)
+      expect(uninstallSpy).toHaveBeenCalledWith({
+        gameId: "srv-b",
+        gameName: "Bravo",
+      })
+
+      // Subsequent idle event does not trigger another uninstall
+      await act(async () => {
+        onLaunchStatusCb?.("idle", { gameId: "srv-b" })
+        await Promise.resolve()
+      })
+      expect(uninstallSpy).toHaveBeenCalledTimes(1)
+
+      unmount()
+    })
+
+    it("4. Server removed while active operation: postpones uninstall until phase IDLE", async () => {
+      const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+      const serverB = { id: "srv-b", name: "Bravo", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+
+      let currentServers = [serverA, serverB]
+      vi.spyOn(serverService, "getLauncherServers").mockImplementation(async () => currentServers as any)
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // Server B has an active operation (DOWNLOADING)
+      ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+        status: "idle",
+        operationState: "DOWNLOADING",
+        activeOperationGameId: "srv-b",
+        activeOperationState: "DOWNLOADING",
+      })
+
+      // Admin deletes server B
+      currentServers = [serverA]
+
+      await act(async () => {
+        await result.current.refreshServers()
+      })
+
+      // UI updated, uninstall postponed
+      expect(result.current.servers).toEqual([serverA])
+      expect(uninstallSpy).not.toHaveBeenCalled()
+
+      // Operation finishes and goes to IDLE
+      ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
+        status: "idle",
+        operationState: "IDLE",
+        activeOperationGameId: null,
+        activeOperationState: "IDLE",
+      })
+
+      await act(async () => {
+        onPhaseChangeCb?.("IDLE", "srv-b")
+        await Promise.resolve()
+      })
+
+      expect(uninstallSpy).toHaveBeenCalledTimes(1)
+      expect(uninstallSpy).toHaveBeenCalledWith({
+        gameId: "srv-b",
+        gameName: "Bravo",
+      })
+
+      unmount()
+    })
+
+    it("5. If all servers disappear: servers=[], selectedGameId=null, and all removed servers are processed", async () => {
+      const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+      const serverB = { id: "srv-b", name: "Bravo", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+
+      let currentServers = [serverA, serverB]
+      vi.spyOn(serverService, "getLauncherServers").mockImplementation(async () => currentServers as any)
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(result.current.servers).toHaveLength(2)
+      expect(result.current.selectedGameId).toBe("srv-a")
+
+      // Admin deletes both servers: empty list
+      currentServers = []
+
+      await act(async () => {
+        await result.current.refreshServers()
+      })
+
+      expect(result.current.servers).toEqual([])
+      expect(result.current.selectedGameId).toBeNull()
+      expect(result.current.gameStates).toEqual({})
+
+      // Both servers uninstalled
+      expect(uninstallSpy).toHaveBeenCalledWith({
+        gameId: "srv-a",
+        gameName: "Alpha",
+      })
+      expect(uninstallSpy).toHaveBeenCalledWith({
+        gameId: "srv-b",
+        gameName: "Bravo",
+      })
+      expect(uninstallSpy).toHaveBeenCalledTimes(2)
+
+      unmount()
+    })
+
+    it("6. No second WebSocket connection: uses existing subscribeReleaseEvents and reacts to SERVER_UPDATED", async () => {
+      const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+      const serverB = { id: "srv-b", name: "Bravo", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+
+      let currentServers = [serverA, serverB]
+      const getServersSpy = vi.spyOn(serverService, "getLauncherServers").mockImplementation(async () => currentServers as any)
+      const subscribeSpy = vi.spyOn(gameService, "subscribeReleaseEvents")
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // Authenticate
+      await act(async () => {
+        result.current.handleLogin("AdminUser")
+      })
+
+      const initialSubscribeCalls = subscribeSpy.mock.calls.length
+
+      // Now Backend emits SERVER_UPDATED via existing WebSocket
+      currentServers = [serverA]
+      await act(async () => {
+        releaseEventsCb?.({ type: "SERVER_UPDATED", serverId: "srv-b" })
+        await Promise.resolve()
+      })
+
+      // loadServers() was invoked
+      expect(getServersSpy).toHaveBeenCalled()
+      // Server B uninstalled
+      expect(uninstallSpy).toHaveBeenCalledWith({
+        gameId: "srv-b",
+        gameName: "Bravo",
+      })
+      expect(result.current.servers).toEqual([serverA])
+
+      // No additional subscribeReleaseEvents was called!
+      expect(subscribeSpy.mock.calls.length).toBe(initialSubscribeCalls)
+
+      unmount()
+    })
+  })
 })
 
 
