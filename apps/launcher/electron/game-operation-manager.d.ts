@@ -29,5 +29,5 @@ export declare class GameOperationManager {
   pauseSync(): Promise<any>
   cancelSync(instanceRoot: string): Promise<any>
   launchGame(gameLauncher: any, options?: any): Promise<any>
-  uninstallGame(instanceRoot: string, appDataRoot: string): Promise<any>
+  uninstallGame(instanceRoot: string, gamesRoot: string): Promise<any>
 }

@@ -18,10 +18,21 @@ if (!singleInstanceLock) {
   process.exit(0)
 }
 
-const appDataRoot = path.join(app.getPath("appData"), "HiKAT")
+const {
+  getHiKatRoot,
+  getLauncherRoot,
+  getGamesRoot,
+  getRuntimeRoot,
+  getUserDataRoot,
+  getLegacyInstanceRoot,
+  validateGameName,
+  resolveGameContext,
+} = require("./install-paths.cjs")
+
+const appDataRoot = getHiKatRoot()
 
 try {
-  app.setPath("userData", path.join(appDataRoot, "launcher"))
+  app.setPath("userData", getUserDataRoot())
 } catch (_) { }
 
 // Protocol client registration for OAuth deep linking (hikat://auth/callback)
@@ -42,110 +53,17 @@ const {
 } = require("./client-files-sync.cjs")
 const { loadCoreState } = require("./minecraft-core.cjs")
 
-const gamesRoot = path.join(appDataRoot, "games")
-const legacyInstanceRoot = path.join(appDataRoot, "game files")
+const gamesRoot = getGamesRoot()
+const legacyInstanceRoot = getLegacyInstanceRoot()
 const instanceRoot = legacyInstanceRoot
 
-const WINDOWS_INVALID_CHARS = /[<>:"/\\|?*]/
-const WINDOWS_RESERVED_NAMES = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i
-
 function getAppDataRoot() {
-  try {
-    return path.join(app.getPath("appData"), "HiKAT")
-  } catch (_) {
-    return appDataRoot
-  }
-}
-
-function getGamesRoot() {
-  try {
-    return path.join(app.getPath("appData"), "HiKAT", "games")
-  } catch (_) {
-    return gamesRoot
-  }
-}
-
-function getLegacyInstanceRoot() {
-  try {
-    return path.join(app.getPath("appData"), "HiKAT", "game files")
-  } catch (_) {
-    return legacyInstanceRoot
-  }
-}
-
-function validateGameName(name) {
-  if (typeof name !== "string") {
-    throw new Error("Invalid gameName: must be a string.")
-  }
-  if (!name) {
-    throw new Error("Invalid gameName: cannot be empty.")
-  }
-  if (name !== name.trim()) {
-    throw new Error("Invalid gameName: leading or trailing whitespace is not allowed.")
-  }
-  if (name === "." || name === "..") {
-    throw new Error("Invalid gameName: '.' or '..' is not allowed.")
-  }
-  if (name.includes("/") || name.includes("\\")) {
-    throw new Error("Invalid gameName: directory separators are not allowed.")
-  }
-  if (name.endsWith(".")) {
-    throw new Error("Invalid gameName: name cannot end with a period.")
-  }
-  if (WINDOWS_INVALID_CHARS.test(name)) {
-    throw new Error("Invalid gameName: contains invalid filesystem characters.")
-  }
-  const baseName = name.split(".")[0]
-  if (WINDOWS_RESERVED_NAMES.test(name) || WINDOWS_RESERVED_NAMES.test(baseName)) {
-    throw new Error(`Invalid gameName: "${name}" is a reserved system name.`)
-  }
-  const currentGamesRoot = getGamesRoot()
-  const resolved = path.resolve(currentGamesRoot, name)
-  const rel = path.relative(currentGamesRoot, resolved)
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error("Invalid gameName: path escapes gamesRoot.")
-  }
-  return name
-}
-
-function resolveGameContext(payload = {}) {
-  const hasGameId =
-    payload &&
-    payload.gameId !== undefined &&
-    payload.gameId !== null &&
-    String(payload.gameId).trim() !== ""
-  const hasGameName =
-    payload &&
-    payload.gameName !== undefined &&
-    payload.gameName !== null &&
-    String(payload.gameName).trim() !== ""
-
-  if (hasGameId && hasGameName) {
-    const gameId = String(payload.gameId).trim()
-    const validName = validateGameName(payload.gameName)
-    const currentGamesRoot = getGamesRoot()
-
-    return {
-      gameId,
-      gameName: validName,
-      instanceRoot: path.join(currentGamesRoot, validName),
-    }
-  }
-
-  if (!hasGameId && !hasGameName) {
-    return {
-      gameId: null,
-      gameName: null,
-      instanceRoot: getLegacyInstanceRoot(),
-    }
-  }
-
-  throw new Error("Invalid game context: gameId and gameName must be provided together or neither.")
+  return getHiKatRoot()
 }
 
 const gameLauncher = new GameLauncher(app, {
   instanceRoot,
-  javaStorageRoot: appDataRoot,
+  javaStorageRoot: getHiKatRoot(),
   processStateRoot: app.getPath("userData"),
 })
 const operationManager = new GameOperationManager()
@@ -471,7 +389,7 @@ async function processPendingGameRemovals() {
 
           const safeGameName = item.gameName || (item.gameId ? String(item.gameId) : undefined)
           const ctx = resolveGameContext({ gameId: item.gameId, gameName: safeGameName })
-          await operationManager.uninstallGame(ctx.instanceRoot, getAppDataRoot())
+          await operationManager.uninstallGame(ctx.instanceRoot, getGamesRoot())
           clearGameIntegrityDirty(gameId)
           pendingGameRemovals.delete(gameId)
           savePersistentDownloadQueue()
@@ -2116,7 +2034,7 @@ ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
     setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
     return await operationManager.checkPlan({
       instanceRoot: ctx.instanceRoot,
-      javaStorageRoot: appDataRoot,
+      javaStorageRoot: getHiKatRoot(),
       clientFiles: payload.clientFiles,
       directoryPolicies: payload.directoryPolicies,
       modpackVersion: payload.modpackVersion,
@@ -2464,7 +2382,7 @@ async function runGameSync(ctx, payload) {
   try {
     const result = await operationManager.startSync({
       instanceRoot: ctx.instanceRoot,
-      javaStorageRoot: appDataRoot,
+      javaStorageRoot: getHiKatRoot(),
       clientFiles: payload.clientFiles,
       directoryPolicies: payload.directoryPolicies,
       modpackVersion: payload.modpackVersion,
@@ -3457,6 +3375,10 @@ if (typeof module !== "undefined" && module.exports) {
     runGameSync,
     getGamesRoot,
     getAppDataRoot,
+    getHiKatRoot,
+    getRuntimeRoot,
+    getLauncherRoot,
+    getUserDataRoot,
     getLegacyInstanceRoot,
     getResumeProgressFloor: () => resumeProgressFloor,
     getDownloadQueue: () => downloadQueue,

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "com.hikat.launcher",
+  "productName": "HiKAT Launcher",
+  "electronDist": "node_modules/electron/dist",
+  "directories": {
+    "output": "dist-installer"
+  },
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "perMachine": false,
+    "allowElevation": true,
+    "differentialPackage": false,
+    "deleteAppDataOnUninstall": false,
+    "include": "installer/customInstall.nsh"
+  }
+}

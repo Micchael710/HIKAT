@@ -665,12 +665,12 @@ class GameOperationManager {
     return { success: true, state: "IDLE" }
   }
 
-  async uninstallGame(instanceRoot, appDataRoot) {
+  async uninstallGame(instanceRoot, gamesRoot) {
     if (this.state === "SYNCING" || this.state === "INSTALLING") {
       throw new Error("Cannot uninstall game while synchronization is active.")
     }
     this.state = "IDLE"
-    return uninstallGame(instanceRoot, appDataRoot)
+    return uninstallGame(instanceRoot, gamesRoot)
   }
 
   async launchGame(gameLauncher, options = {}) {

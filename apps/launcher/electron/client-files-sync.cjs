@@ -1866,20 +1866,20 @@ async function executeSync(options) {
 
 /**
  * Safely uninstalls the game instance directory.
- * Strictly verifies path against appData canonical boundaries.
+ * Strictly verifies path against canonical gamesRoot boundary.
  */
-async function uninstallGame(instanceRoot, appDataRoot) {
+async function uninstallGame(instanceRoot, gamesRoot) {
   const resolvedInstance = path.resolve(instanceRoot)
-  const resolvedAppData = path.resolve(appDataRoot)
+  const resolvedGames = path.resolve(gamesRoot)
 
-  const relative = path.relative(resolvedAppData, resolvedInstance)
+  const relative = path.relative(resolvedGames, resolvedInstance)
   if (
     !relative ||
     relative.startsWith("..") ||
     path.isAbsolute(relative) ||
     resolvedInstance === path.parse(resolvedInstance).root
   ) {
-    throw new Error("Security violation: Attempted to uninstall directory outside canonical appData.")
+    throw new Error("Security violation: Attempted to uninstall directory outside canonical gamesRoot.")
   }
 
   if (fs.existsSync(resolvedInstance)) {
