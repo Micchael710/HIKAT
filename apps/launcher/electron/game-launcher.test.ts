@@ -62,11 +62,17 @@ describe("GameLauncher & computeHiKatPlayerUuid Identity Suite", () => {
           name: "vBrayan06",
           id: EXPECTED_USER_123_UUID,
         },
+        userType: "legacy",
       }),
     )
 
+    const passedOptions = mockXmcl.mock.calls[0][0]
+    expect(passedOptions.userType).toBe("legacy")
+
     // Verify it is NOT the zero UUID fallback
-    const passedProfile = mockXmcl.mock.calls[0][0].gameProfile
+    const passedProfile = passedOptions.gameProfile
+    expect(passedProfile.name).toBe("vBrayan06")
+    expect(passedProfile.id).toBe(EXPECTED_USER_123_UUID)
     expect(passedProfile.id).not.toBe("00000000-0000-0000-0000-000000000000")
   })
 

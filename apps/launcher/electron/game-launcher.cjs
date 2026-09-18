@@ -453,6 +453,7 @@ class GameLauncher {
           name: cleanPlayerName,
           id: computedPlayerUuid,
         },
+        userType: "legacy",
         minMemory: minMemoryMb,
         maxMemory: maxMemoryMb,
         extraJVMArgs: [...jvmOptimizationArgs, ...customArgs],
