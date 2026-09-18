@@ -9,6 +9,8 @@ import com.hikat.server.HiKatWhitelist;
 import com.hikat.server.IntegrityService;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.logging.LogUtils;
+import org.slf4j.Logger;
 import java.io.IOException;
 import java.nio.file.Path;
 import net.minecraft.commands.CommandSourceStack;
@@ -32,6 +34,7 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 @Mod("hikat")
 public class HiKatMod {
     public static final String MODID = "hikat";
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     private static ConnectionGate connectionGate;
     private static SessionReader.ClientSnapshot clientSnapshot;
@@ -221,16 +224,16 @@ public class HiKatMod {
             var player = event.getPlayer();
             var connection = player.connection;
 
-            System.out.println("[HiKAT DEBUG] player UUID = " + player.getUUID());
+            LOGGER.info("[HiKAT DEBUG] player UUID = {}", player.getUUID());
 
-            System.out.println(
-                "[HiKAT DEBUG] player GameProfile UUID = "
-                + player.getGameProfile().getId()
+            LOGGER.info(
+                "[HiKAT DEBUG] player GameProfile UUID = {}",
+                player.getGameProfile().getId()
             );
 
-            System.out.println(
-                "[HiKAT DEBUG] localGameProfile UUID = "
-                + connection.getLocalGameProfile().getId()
+            LOGGER.info(
+                "[HiKAT DEBUG] localGameProfile UUID = {}",
+                connection.getLocalGameProfile().getId()
             );
 
             var info = connection.getListedOnlinePlayers().stream()
@@ -238,14 +241,14 @@ public class HiKatMod {
                 .findFirst()
                 .orElse(null);
 
-            System.out.println(
-                "[HiKAT DEBUG] PlayerInfo UUID = "
-                + (info != null ? info.getProfile().getId() : "NULL")
+            LOGGER.info(
+                "[HiKAT DEBUG] PlayerInfo UUID = {}",
+                info != null ? info.getProfile().getId() : "NULL"
             );
 
-            System.out.println(
-                "[HiKAT DEBUG] PlayerInfo name = "
-                + (info != null ? info.getProfile().getName() : "NULL")
+            LOGGER.info(
+                "[HiKAT DEBUG] PlayerInfo name = {}",
+                info != null ? info.getProfile().getName() : "NULL"
             );
 
             if (clientSnapshot != null) {
