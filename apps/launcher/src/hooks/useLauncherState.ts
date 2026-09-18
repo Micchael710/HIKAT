@@ -36,7 +36,13 @@ import {
 import { authService } from "../services/authService"
 import { serverService, LauncherServer, LauncherReleaseSummary } from "../services/serverService"
 import { gameService, ReleaseActivatedEvent } from "../services/gameService"
-import { getStoredBoolean, STORAGE_KEYS, SETTINGS_CHANGED_EVENT } from "../utils/settingsStorage"
+import {
+  getStoredBoolean,
+  getKnownServers,
+  setKnownServers,
+  STORAGE_KEYS,
+  SETTINGS_CHANGED_EVENT,
+} from "../utils/settingsStorage"
 import type { PublishedModpack } from "../vite-env"
 
 export type LauncherGameState = {
@@ -154,10 +160,15 @@ export function useLauncherState() {
 
   const loadServers = useCallback(async () => {
     try {
-      const list = await serverService.getLauncherServers()
-      const prevList = serversRef.current
+      const fetchResult = await serverService.getLauncherServersResult()
+      if (!fetchResult.success) {
+        return serversRef.current
+      }
+
+      const list = fetchResult.servers
+      const prevKnown = getKnownServers(serversRef.current)
       const newIds = new Set(list.map((server) => server.id))
-      const removedServers = prevList.filter((server) => !newIds.has(server.id))
+      const removedServers = prevKnown.filter((server) => !newIds.has(server.id))
 
       if (removedServers.length > 0) {
         for (const removed of removedServers) {
@@ -167,6 +178,8 @@ export function useLauncherState() {
           })
         }
       }
+
+      setKnownServers(list)
 
       if (list.length > 0) {
         const existingStates = gameStatesRef.current

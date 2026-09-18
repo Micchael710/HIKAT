@@ -1270,6 +1270,143 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
       unmount()
     })
   })
+
+  describe("Persistent Known Servers Catalog Deletion Reconciliation Suite", () => {
+    it("1. Launcher cerrado: catálogo previo = [A], backend válido actual = [] -> uninstall(A)", async () => {
+      window.localStorage.setItem(
+        "hikat_known_servers",
+        JSON.stringify([{ id: "srv-a", name: "Alpha" }])
+      )
+
+      const getServersSpy = vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([])
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // Servidor A detectado como eliminado y desinstalado
+      expect(uninstallSpy).toHaveBeenCalledWith({
+        gameId: "srv-a",
+        gameName: "Alpha",
+      })
+      expect(result.current.servers).toEqual([])
+      expect(JSON.parse(window.localStorage.getItem("hikat_known_servers") || "[]")).toEqual([])
+
+      unmount()
+      getServersSpy.mockRestore()
+      uninstallSpy.mockRestore()
+    })
+
+    it("2. Varios servidores: catálogo previo = [A, B, C], backend actual = [A, C] -> uninstall(B)", async () => {
+      window.localStorage.setItem(
+        "hikat_known_servers",
+        JSON.stringify([
+          { id: "srv-a", name: "Alpha" },
+          { id: "srv-b", name: "Bravo" },
+          { id: "srv-c", name: "Charlie" },
+        ])
+      )
+
+      const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+      const serverC = { id: "srv-c", name: "Charlie", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+
+      const getServersSpy = vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([serverA, serverC] as any)
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(uninstallSpy).toHaveBeenCalledTimes(1)
+      expect(uninstallSpy).toHaveBeenCalledWith({
+        gameId: "srv-b",
+        gameName: "Bravo",
+      })
+      // A y C NO son desinstalados
+      expect(uninstallSpy).not.toHaveBeenCalledWith(expect.objectContaining({ gameId: "srv-a" }))
+      expect(uninstallSpy).not.toHaveBeenCalledWith(expect.objectContaining({ gameId: "srv-c" }))
+
+      // Catálogo persistido actualizado a [A, C]
+      const saved = JSON.parse(window.localStorage.getItem("hikat_known_servers") || "[]")
+      expect(saved).toEqual([
+        { id: "srv-a", name: "Alpha" },
+        { id: "srv-c", name: "Charlie" },
+      ])
+      expect(result.current.servers).toHaveLength(2)
+
+      unmount()
+      getServersSpy.mockRestore()
+      uninstallSpy.mockRestore()
+    })
+
+    it("3. Error de red / GraphQL: catálogo previo = [A], backend falla -> NO uninstall(A) y NO sobrescribir catálogo", async () => {
+      window.localStorage.setItem(
+        "hikat_known_servers",
+        JSON.stringify([{ id: "srv-a", name: "Alpha" }])
+      )
+
+      const getServersResultSpy = vi.spyOn(serverService, "getLauncherServersResult").mockResolvedValue({
+        success: false,
+        servers: [],
+        error: "Network / GraphQL offline",
+      })
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // NO se desinstala nada
+      expect(uninstallSpy).not.toHaveBeenCalled()
+
+      // El catálogo persistido se preserva intacto
+      const saved = JSON.parse(window.localStorage.getItem("hikat_known_servers") || "[]")
+      expect(saved).toEqual([{ id: "srv-a", name: "Alpha" }])
+
+      unmount()
+      getServersResultSpy.mockRestore()
+      uninstallSpy.mockRestore()
+    })
+
+    it("5. Backend responde correctamente con la misma lista: no se desinstala nada", async () => {
+      window.localStorage.setItem(
+        "hikat_known_servers",
+        JSON.stringify([
+          { id: "srv-a", name: "Alpha" },
+          { id: "srv-b", name: "Bravo" },
+        ])
+      )
+
+      const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+      const serverB = { id: "srv-b", name: "Bravo", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+
+      const getServersSpy = vi.spyOn(serverService, "getLauncherServers").mockResolvedValue([serverA, serverB] as any)
+      const uninstallSpy = vi.spyOn(gameService, "uninstallGame").mockResolvedValue(true)
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // No se desinstala nada
+      expect(uninstallSpy).not.toHaveBeenCalled()
+
+      // Catálogo persistido se mantiene con A y B
+      const saved = JSON.parse(window.localStorage.getItem("hikat_known_servers") || "[]")
+      expect(saved).toEqual([
+        { id: "srv-a", name: "Alpha" },
+        { id: "srv-b", name: "Bravo" },
+      ])
+
+      unmount()
+      getServersSpy.mockRestore()
+      uninstallSpy.mockRestore()
+    })
+  })
 })
 
 

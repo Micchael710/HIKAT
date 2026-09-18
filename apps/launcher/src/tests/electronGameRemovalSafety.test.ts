@@ -362,4 +362,31 @@ describe("Electron Main Game Removal Safety Suite", () => {
     expect(promoteRes.success).toBe(false)
     expect(promoteRes.error).toMatch(/marked for removal/)
   })
+
+  it("10. Instalación parcial o fallida con archivos incompletos: carpeta se elimina completamente sin requerir manifest válido", async () => {
+    const ctx = resolveGameContext({ gameId: "server-partial", gameName: "Partial Server" })
+    // Crear carpeta con archivos incompletos / parciales y sin manifest válido
+    await fsp.mkdir(path.join(ctx.instanceRoot, "mods"), { recursive: true })
+    await fsp.mkdir(path.join(ctx.instanceRoot, "staging"), { recursive: true })
+    await fsp.writeFile(path.join(ctx.instanceRoot, "mods", "incomplete.jar.part"), "half-downloaded-bytes", "utf8")
+    await fsp.writeFile(path.join(ctx.instanceRoot, "staging", "download.tmp"), "temp-data", "utf8")
+    await fsp.writeFile(path.join(ctx.instanceRoot, "options.txt"), "difficulty=1", "utf8")
+
+    expect(fs.existsSync(ctx.instanceRoot)).toBe(true)
+    expect(fs.existsSync(path.join(ctx.instanceRoot, "mods", "incomplete.jar.part"))).toBe(true)
+
+    // Servidor eliminado en backend -> se llama a game-uninstall
+    const uninstallHandler = ipcHandlers.get("game-uninstall")
+    expect(uninstallHandler).toBeDefined()
+    const res = await uninstallHandler!({}, { gameId: "server-partial", gameName: "Partial Server" })
+    expect(res).toEqual({ success: true })
+
+    // Procesa remociones pendientes
+    await new Promise((r) => setTimeout(r, 100))
+
+    // La carpeta queda completamente eliminada a pesar de no tener manifest ni ser instalación completa
+    expect(fs.existsSync(ctx.instanceRoot)).toBe(false)
+    expect(getPendingGameRemovals().has("server-partial")).toBe(false)
+  })
 })
+

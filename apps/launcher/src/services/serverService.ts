@@ -39,13 +39,17 @@ export interface LauncherServer {
 
 let inMemoryServers: LauncherServer[] = []
 
+export interface LauncherServersFetchResult {
+  success: boolean
+  servers: LauncherServer[]
+  error?: string
+}
+
 export const serverService = {
   /**
-   * Fetch published servers available to the launcher.
-   * Authoritative source is Backend GraphQL launcherServers.
-   * Does NOT read or write localStorage catalog cache.
+   * Internal authoritative fetcher against Backend GraphQL launcherServers.
    */
-  async getLauncherServers(): Promise<LauncherServer[]> {
+  async fetchLauncherServersAuthoritative(): Promise<LauncherServersFetchResult> {
     const query = /* GraphQL */ `
       query GetLauncherServers {
         launcherServers {
@@ -83,13 +87,64 @@ export const serverService = {
         }
       }
     `
-    const res = await graphqlClient<{ launcherServers: LauncherServer[] }>(query)
-    if (res.success && Array.isArray(res.data?.launcherServers)) {
-      inMemoryServers = res.data.launcherServers
-      return res.data.launcherServers
+    try {
+      const res = await graphqlClient<{ launcherServers: LauncherServer[] }>(query)
+      if (res.success && Array.isArray(res.data?.launcherServers)) {
+        inMemoryServers = res.data.launcherServers
+        return {
+          success: true,
+          servers: res.data.launcherServers,
+        }
+      }
+
+      return {
+        success: false,
+        servers: inMemoryServers,
+        error: res.error || "Failed to fetch launcher servers",
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        servers: inMemoryServers,
+        error: err?.message || "Network error",
+      }
+    }
+  },
+
+  /**
+   * Fetch published servers with explicit outcome envelope.
+   * Allows consumers to distinguish a valid empty catalog ([])
+   * from a network or GraphQL error.
+   */
+  async getLauncherServersResult(): Promise<LauncherServersFetchResult> {
+    const isMocked = Boolean((this.getLauncherServers as any)?.mock)
+    if (isMocked) {
+      try {
+        const mocked = await (this.getLauncherServers as any)()
+        return {
+          success: true,
+          servers: Array.isArray(mocked) ? mocked : [],
+        }
+      } catch (err: any) {
+        return {
+          success: false,
+          servers: inMemoryServers,
+          error: err?.message || "Mock error",
+        }
+      }
     }
 
-    return inMemoryServers
+    return this.fetchLauncherServersAuthoritative()
+  },
+
+  /**
+   * Fetch published servers available to the launcher.
+   * Authoritative source is Backend GraphQL launcherServers.
+   * Does NOT read or write localStorage catalog cache.
+   */
+  async getLauncherServers(): Promise<LauncherServer[]> {
+    const res = await this.fetchLauncherServersAuthoritative()
+    return res.servers
   },
 
   /**

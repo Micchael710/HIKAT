@@ -10,6 +10,7 @@ export const STORAGE_KEYS = {
   RAM_AUTO: "hikat_ram_auto",
   DEDICATED_GPU: "hikat_dedicated_gpu",
   JAVA_MAJOR_VERSION: "hikat_java_major_version",
+  KNOWN_SERVERS: "hikat_known_servers",
 } as const
 
 export const SETTINGS_CHANGED_EVENT = "hikat:settings-changed"
@@ -55,3 +56,36 @@ export function setStoredNumber(key: string, value: number): void {
     localStorage.setItem(key, String(value))
   } catch (_) {}
 }
+
+export interface KnownServerRecord {
+  id: string
+  name: string
+}
+
+export function getKnownServers(fallbackList?: Array<{ id: string; name: string }>): KnownServerRecord[] {
+  if (typeof window === "undefined") return []
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.KNOWN_SERVERS)
+    if (raw !== null) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((s) => s && typeof s.id === "string" && typeof s.name === "string")
+          .map((s) => ({ id: s.id, name: s.name }))
+      }
+    }
+  } catch (_) {}
+  return fallbackList ? fallbackList.map((s) => ({ id: s.id, name: s.name })) : []
+}
+
+export function setKnownServers(servers: Array<{ id: string; name: string }>): void {
+  if (typeof window === "undefined") return
+  try {
+    const records: KnownServerRecord[] = servers.map((s) => ({
+      id: s.id,
+      name: s.name,
+    }))
+    localStorage.setItem(STORAGE_KEYS.KNOWN_SERVERS, JSON.stringify(records))
+  } catch (_) {}
+}
+
