@@ -38,6 +38,11 @@ import {
   handleProxyRoutes,
 } from "./services/proxyService"
 
+import {
+  handleMinecraftSkinServe,
+  handleMinecraftCapeServe,
+} from "./services/minecraftTextureService"
+
 export * from "./types"
 
 export * from "./auth/verifier"
@@ -59,6 +64,8 @@ export * from "./services/dashboardService"
 export * from "./services/skinService"
 
 export * from "./services/capeService"
+
+export * from "./services/minecraftTextureService"
 
 export * from "./services/game"
 
@@ -222,6 +229,35 @@ export default {
       return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
         status: 405,
 
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    // Public Custom Skin Loader Texture Routes: GET /minecraft/skins/:username.png and GET /minecraft/capes/:username.png
+    if (url.pathname.startsWith("/minecraft/skins/")) {
+      if (request.method === "GET") {
+        const filename = url.pathname.slice("/minecraft/skins/".length)
+        const username = filename.toLowerCase().endsWith(".png") ? filename.slice(0, -4) : ""
+        return handleMinecraftSkinServe(request, env, db, username)
+      }
+
+      const corsHeaders = getCorsHeaders(request, env)
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+        status: 405,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      })
+    }
+
+    if (url.pathname.startsWith("/minecraft/capes/")) {
+      if (request.method === "GET") {
+        const filename = url.pathname.slice("/minecraft/capes/".length)
+        const username = filename.toLowerCase().endsWith(".png") ? filename.slice(0, -4) : ""
+        return handleMinecraftCapeServe(request, env, db, username)
+      }
+
+      const corsHeaders = getCorsHeaders(request, env)
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+        status: 405,
         headers: { "Content-Type": "application/json", ...corsHeaders },
       })
     }
