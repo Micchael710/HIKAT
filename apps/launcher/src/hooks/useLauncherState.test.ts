@@ -1119,7 +1119,7 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
       unmount()
     })
 
-    it("3. Server removed while Minecraft is running: postpones uninstall until status idle, then uninstalls once", async () => {
+    it("3. Server removed: immediately delegates uninstall to Electron Main without managing busy states in React", async () => {
       const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
       const serverB = { id: "srv-b", name: "Bravo", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
 
@@ -1134,13 +1134,6 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
 
       expect(result.current.servers).toHaveLength(2)
 
-      // Minecraft for server B is running!
-      ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
-        status: "running",
-        runningGameId: "srv-b",
-        operationState: "IDLE",
-      })
-
       // Admin deletes server B
       currentServers = [serverA]
 
@@ -1152,39 +1145,17 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
       expect(result.current.servers).toEqual([serverA])
       expect(result.current.gameStates["srv-b"]).toBeUndefined()
 
-      // But NOT uninstalled yet because Minecraft is running
-      expect(uninstallSpy).not.toHaveBeenCalled()
-
-      // Now Minecraft stops running
-      ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
-        status: "idle",
-        runningGameId: null,
-        operationState: "IDLE",
-      })
-
-      await act(async () => {
-        onLaunchStatusCb?.("idle", { gameId: "srv-b" })
-        await Promise.resolve()
-      })
-
-      // Uninstalled exactly once
+      // Renderer calls uninstallGame ONCE immediately; Electron Main holds removal guarantee
       expect(uninstallSpy).toHaveBeenCalledTimes(1)
       expect(uninstallSpy).toHaveBeenCalledWith({
         gameId: "srv-b",
         gameName: "Bravo",
       })
 
-      // Subsequent idle event does not trigger another uninstall
-      await act(async () => {
-        onLaunchStatusCb?.("idle", { gameId: "srv-b" })
-        await Promise.resolve()
-      })
-      expect(uninstallSpy).toHaveBeenCalledTimes(1)
-
       unmount()
     })
 
-    it("4. Server removed while active operation: postpones uninstall until phase IDLE", async () => {
+    it("4. Server removed while active operation or launch: renderer calls uninstallGame once and leaves safety to Electron Main", async () => {
       const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
       const serverB = { id: "srv-b", name: "Bravo", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
 
@@ -1197,14 +1168,6 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
         await Promise.resolve()
       })
 
-      // Server B has an active operation (DOWNLOADING)
-      ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
-        status: "idle",
-        operationState: "DOWNLOADING",
-        activeOperationGameId: "srv-b",
-        activeOperationState: "DOWNLOADING",
-      })
-
       // Admin deletes server B
       currentServers = [serverA]
 
@@ -1212,23 +1175,8 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
         await result.current.refreshServers()
       })
 
-      // UI updated, uninstall postponed
+      // UI updated, uninstall called exactly once
       expect(result.current.servers).toEqual([serverA])
-      expect(uninstallSpy).not.toHaveBeenCalled()
-
-      // Operation finishes and goes to IDLE
-      ;(window as any).electronAPI.getLaunchStatus = vi.fn().mockResolvedValue({
-        status: "idle",
-        operationState: "IDLE",
-        activeOperationGameId: null,
-        activeOperationState: "IDLE",
-      })
-
-      await act(async () => {
-        onPhaseChangeCb?.("IDLE", "srv-b")
-        await Promise.resolve()
-      })
-
       expect(uninstallSpy).toHaveBeenCalledTimes(1)
       expect(uninstallSpy).toHaveBeenCalledWith({
         gameId: "srv-b",

@@ -152,66 +152,6 @@ export function useLauncherState() {
     } catch (_) {}
   }, [])
 
-  const pendingServerUninstallsRef = useRef<Map<string, { id: string; name: string }>>(new Map())
-  const uninstallsInProgressRef = useRef<Set<string>>(new Set())
-
-  const tryUninstallRemovedServer = useCallback(
-    async (server: { id: string; name: string }) => {
-      if (!server?.id) return false
-      if (uninstallsInProgressRef.current.has(server.id)) {
-        return false
-      }
-
-      uninstallsInProgressRef.current.add(server.id)
-      try {
-        let isBusy = false
-        if (window.electronAPI?.getLaunchStatus) {
-          try {
-            const launchStatus = await window.electronAPI.getLaunchStatus({
-              gameId: server.id,
-              gameName: server.name,
-            })
-
-            const isMinecraftRunning =
-              (Boolean(launchStatus?.status) && launchStatus.status !== "idle") ||
-              launchStatus?.runningGameId === server.id
-
-            const isOperationActive =
-              (Boolean(launchStatus?.operationState) && launchStatus.operationState !== "IDLE") ||
-              (launchStatus?.activeOperationGameId === server.id &&
-                Boolean(launchStatus?.activeOperationState) &&
-                launchStatus.activeOperationState !== "IDLE")
-
-            isBusy = Boolean(isMinecraftRunning || isOperationActive)
-          } catch (_) {
-            isBusy = false
-          }
-        }
-
-        if (isBusy) {
-          pendingServerUninstallsRef.current.set(server.id, { id: server.id, name: server.name })
-          return false
-        }
-
-        const success = await gameService.uninstallGame({
-          gameId: server.id,
-          gameName: server.name,
-        })
-
-        if (success) {
-          pendingServerUninstallsRef.current.delete(server.id)
-        }
-        return success
-      } catch (err) {
-        console.error("[Launcher] Error during automatic uninstall of removed server:", server.id, err)
-        return false
-      } finally {
-        uninstallsInProgressRef.current.delete(server.id)
-      }
-    },
-    [],
-  )
-
   const loadServers = useCallback(async () => {
     try {
       const list = await serverService.getLauncherServers()
@@ -221,7 +161,10 @@ export function useLauncherState() {
 
       if (removedServers.length > 0) {
         for (const removed of removedServers) {
-          void tryUninstallRemovedServer({ id: removed.id, name: removed.name })
+          void gameService.uninstallGame({
+            gameId: removed.id,
+            gameName: removed.name,
+          })
         }
       }
 
@@ -349,7 +292,7 @@ export function useLauncherState() {
     } catch (_) {
       return []
     }
-  }, [triggerAutoUpdateIfNeeded, tryUninstallRemovedServer])
+  }, [triggerAutoUpdateIfNeeded])
 
   const [lastReleaseEvent, setLastReleaseEvent] = useState<ReleaseActivatedEvent | null>(null)
 
@@ -590,17 +533,6 @@ export function useLauncherState() {
   // Global listener for phase changes (updates installed state upon completion of any operation)
   useEffect(() => {
     const unsubPhase = window.electronAPI?.onPhaseChange?.((phase: string, eventGameId?: string | null) => {
-      if (phase === "IDLE") {
-        if (eventGameId && pendingServerUninstallsRef.current.has(eventGameId)) {
-          const pending = pendingServerUninstallsRef.current.get(eventGameId)!
-          void tryUninstallRemovedServer(pending)
-        } else if (!eventGameId) {
-          for (const pending of Array.from(pendingServerUninstallsRef.current.values())) {
-            void tryUninstallRemovedServer(pending)
-          }
-        }
-      }
-
       if (phase === "IDLE" && eventGameId) {
         const targetServer = serversRef.current.find((s) => s.id === eventGameId)
         const gameName = targetServer?.name
@@ -634,25 +566,7 @@ export function useLauncherState() {
       }
     })
     return () => unsubPhase?.()
-  }, [triggerAutoUpdateIfNeeded, tryUninstallRemovedServer])
-
-  // Global listener for launch status (checks pending server uninstalls when Minecraft becomes idle)
-  useEffect(() => {
-    const unsubLaunch = window.electronAPI?.onLaunchStatus?.((status: string, details?: any) => {
-      if (status === "idle") {
-        const targetGameId = details?.gameId || details?.runningGameId
-        if (targetGameId && pendingServerUninstallsRef.current.has(targetGameId)) {
-          const pending = pendingServerUninstallsRef.current.get(targetGameId)!
-          void tryUninstallRemovedServer(pending)
-        } else if (!targetGameId) {
-          for (const pending of Array.from(pendingServerUninstallsRef.current.values())) {
-            void tryUninstallRemovedServer(pending)
-          }
-        }
-      }
-    })
-    return () => unsubLaunch?.()
-  }, [tryUninstallRemovedServer])
+  }, [triggerAutoUpdateIfNeeded])
 
   // Global listener for file integrity changes across any server
   useEffect(() => {

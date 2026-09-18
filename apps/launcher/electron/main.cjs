@@ -49,6 +49,14 @@ const instanceRoot = legacyInstanceRoot
 const WINDOWS_INVALID_CHARS = /[<>:"/\\|?*]/
 const WINDOWS_RESERVED_NAMES = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i
 
+function getAppDataRoot() {
+  try {
+    return path.join(app.getPath("appData"), "HiKAT")
+  } catch (_) {
+    return appDataRoot
+  }
+}
+
 function getGamesRoot() {
   try {
     return path.join(app.getPath("appData"), "HiKAT", "games")
@@ -159,6 +167,8 @@ let currentIsVerify = false
 let lastPayload = null
 const lastPayloadByGameId = new Map()
 let resumeProgressFloor = null
+const pendingGameRemovals = new Map()
+let isProcessingRemovals = false
 
 function mergePersistedPayload(persisted, incoming = {}) {
   if (!persisted) return incoming
@@ -235,6 +245,10 @@ function savePersistentDownloadQueue() {
         savedDownloadedBytes: item.savedDownloadedBytes || 0,
         savedTotalBytes: item.savedTotalBytes || 0,
       })),
+      pendingRemovals: Array.from(pendingGameRemovals.values()).map((item) => ({
+        gameId: item.gameId,
+        gameName: item.gameName,
+      })),
     }
     const tempFile = `${queueFile}.${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`
     fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), "utf8")
@@ -257,8 +271,19 @@ function loadPersistentDownloadQueue() {
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== "object") return
 
+    if (Array.isArray(parsed.pendingRemovals)) {
+      for (const item of parsed.pendingRemovals) {
+        if (item && item.gameId) {
+          pendingGameRemovals.set(item.gameId, {
+            gameId: item.gameId,
+            gameName: item.gameName || item.gameId,
+          })
+        }
+      }
+    }
+
     const restoredQueue = []
-    if (parsed.active && parsed.active.gameId && parsed.active.payload) {
+    if (parsed.active && parsed.active.gameId && parsed.active.payload && !pendingGameRemovals.has(parsed.active.gameId)) {
       if (parsed.active.pausedByUser === true) {
         // Restaurar como ACTIVE + PAUSED sin meter en downloadQueue
         activeOperationGameId = parsed.active.gameId
@@ -304,7 +329,7 @@ function loadPersistentDownloadQueue() {
     }
     if (Array.isArray(parsed.queue)) {
       for (const item of parsed.queue) {
-        if (item && item.gameId && item.payload) {
+        if (item && item.gameId && item.payload && !pendingGameRemovals.has(item.gameId)) {
           if (item.gameId !== activeOperationGameId && !restoredQueue.some((q) => q.gameId === item.gameId)) {
             restoredQueue.push({
               gameId: item.gameId,
@@ -346,6 +371,123 @@ function isGameIntegrityDirty(gameId) {
 function clearGameIntegrityDirty(gameId) {
   dirtyGameIds.delete(gameId || "__default__")
 }
+
+async function processPendingGameRemovals() {
+  if (isProcessingRemovals) return
+  if (pendingGameRemovals.size === 0) return
+  isProcessingRemovals = true
+
+  try {
+    let hadProgress = true
+    while (hadProgress && pendingGameRemovals.size > 0) {
+      hadProgress = false
+      for (const [gameId, item] of Array.from(pendingGameRemovals.entries())) {
+        // 1. Eliminar cualquier entrada de ese gameId de downloadQueue
+        const prevLen = downloadQueue.length
+        downloadQueue = downloadQueue.filter((q) => q.gameId !== gameId)
+        if (currentProcessingItem && currentProcessingItem.gameId === gameId) {
+          currentProcessingItem = null
+        }
+        if (downloadQueue.length !== prevLen) {
+          savePersistentDownloadQueue()
+          notifyDownloadQueueChanged()
+        }
+
+        // 2. Si existe una operación activa del Launcher para ese mismo gameId:
+        // - cancelarla usando el mecanismo genérico YA existente;
+        // - NO importa si está descargando, instalando, verificando, actualizando o pausado;
+        // - no crear condiciones específicas para cada fase.
+        const isThisOpActive = Boolean(
+          (activeOperationGameId && (activeOperationGameId === gameId || (!item.gameId && !activeOperationGameId))) ||
+          (isRestoredUserPause && activeOperationGameId === gameId)
+        )
+
+        if (isThisOpActive) {
+          if (operationManager.isCommitting) {
+            // Sección crítica que no permite cancelación inmediata, esperar al siguiente ciclo
+            continue
+          }
+
+          const safeGameName = item.gameName || (item.gameId ? String(item.gameId) : undefined)
+          const ctx = resolveGameContext({ gameId: item.gameId, gameName: safeGameName })
+          try {
+            const isRestoredPause = Boolean(isRestoredUserPause)
+            isRestoredUserPause = false
+            pausedByUser = false
+            activeOperationGameId = null
+            activeOperationGameName = null
+            activeOperationPayload = null
+            activeOperationSnapshot = null
+            autoPausedDownloadGameId = null
+            resumeProgressFloor = null
+
+            if (operationManager.getState() !== "IDLE" && !isRestoredPause) {
+              await operationManager.cancelSync(ctx.instanceRoot)
+            }
+            savePersistentDownloadQueue()
+            notifyDownloadQueueChanged()
+          } catch (err) {
+            console.warn(`[Main] Cannot cancel operation immediately for ${gameId}:`, err)
+          }
+
+          if (operationManager.getState() !== "IDLE") {
+            continue
+          }
+        }
+
+        // 3. Comprobar únicamente la excepción importante:
+        // ¿Minecraft de ese mismo gameId está ejecutándose?
+        const launchStatus = gameLauncher.getLaunchStatus()
+        const isMinecraftRunningForThisGame =
+          launchStatus.status !== "idle" &&
+          Boolean(launchStatus.gameId === gameId || (!launchStatus.gameId && !gameId))
+
+        if (isMinecraftRunningForThisGame) {
+          // NO borrar todavía; mantener pendingRemovals; esperar a que Minecraft cierre
+          continue
+        }
+
+        // Si otra operación sigue ocupando el operationManager, esperar a que vuelva a IDLE
+        if (operationManager.getState() !== "IDLE") {
+          continue
+        }
+
+        // 4. Safe to delete!
+        try {
+          const watcherKey = item.gameId || "__legacy__"
+          if (instanceWatchers.has(watcherKey)) {
+            try {
+              instanceWatchers.get(watcherKey)?.close()
+            } catch (_) {}
+            instanceWatchers.delete(watcherKey)
+          }
+
+          if (item.gameId) {
+            lastPayloadByGameId.delete(item.gameId)
+          }
+          latestDirectoryPoliciesByGameId.delete(watcherKey)
+          activeBackgroundShaChecks.delete(item.gameId || "__default__")
+          deferredBackgroundShaChecks.delete(item.gameId || "__default__")
+
+          const safeGameName = item.gameName || (item.gameId ? String(item.gameId) : undefined)
+          const ctx = resolveGameContext({ gameId: item.gameId, gameName: safeGameName })
+          await operationManager.uninstallGame(ctx.instanceRoot, getAppDataRoot())
+          clearGameIntegrityDirty(gameId)
+          pendingGameRemovals.delete(gameId)
+          savePersistentDownloadQueue()
+          notifyDownloadQueueChanged()
+          hadProgress = true
+        } catch (err) {
+          console.error(`[Main] Error uninstalling pending game ${gameId}:`, err)
+        }
+      }
+    }
+  } finally {
+    isProcessingRemovals = false
+  }
+}
+
+void processPendingGameRemovals()
 
 function setupInstanceWatcher(gameId = null, targetInstanceRoot = instanceRoot) {
   const key = gameId || "__legacy__"
@@ -441,10 +583,13 @@ gameLauncher.onStatusChangeCallback = (status, details) => {
       focusMainWindow()
     }
 
+    void processPendingGameRemovals()
+
     const pauseOnLaunch = settingsStore.get("pauseDownloadsOnGameLaunch") !== false
     if (
       pauseOnLaunch &&
       autoPausedDownloadGameId &&
+      !pendingGameRemovals.has(autoPausedDownloadGameId) &&
       autoPausedDownloadGameId === activeOperationGameId &&
       operationManager.getState() === "PAUSED"
     ) {
@@ -457,6 +602,7 @@ gameLauncher.onStatusChangeCallback = (status, details) => {
           activeOperationPayload = null
           activeOperationSnapshot = null
           savePersistentDownloadQueue()
+          void processPendingGameRemovals()
           processNextQueuedSync()
         }
         notifyDownloadQueueChanged()
@@ -1985,7 +2131,7 @@ ipcMain.handle("game-check-plan", async (_event, payload = {}) => {
 
 function getDownloadQueueSnapshot() {
   let active = null
-  if (activeOperationGameId) {
+  if (activeOperationGameId && !pendingGameRemovals.has(activeOperationGameId)) {
     const isRestoredPause = isRestoredUserPause && operationManager.getState() === "IDLE"
     const opState = isRestoredPause ? "PAUSED" : operationManager.getState()
     const realPhase =
@@ -2008,10 +2154,10 @@ function getDownloadQueueSnapshot() {
       totalBytes: activeOperationSnapshot?.totalBytes ?? 0,
       remainingMinutes: opState === "PAUSED" ? 0 : (activeOperationSnapshot?.remainingMinutes ?? 0),
     }
-  } else {
+  } else if (!activeOperationGameId) {
     const pendingRecovery = (currentProcessingItem && (currentProcessingItem.savedPhase || currentProcessingItem.savedProgress))
       ? currentProcessingItem
-      : downloadQueue.find((item) => item && (item.savedPhase || (typeof item.savedProgress === "number" && item.savedProgress > 0)))
+      : downloadQueue.find((item) => item && !pendingGameRemovals.has(item.gameId) && (item.savedPhase || (typeof item.savedProgress === "number" && item.savedProgress > 0)))
 
     if (pendingRecovery && operationManager.getState() === "IDLE") {
       const savedPhase = pendingRecovery.savedPhase || "DOWNLOADING"
@@ -2034,9 +2180,9 @@ function getDownloadQueueSnapshot() {
     }
   }
 
-  const queuedSource = active
+  const queuedSource = (active
     ? downloadQueue.filter((item) => item.gameId !== active.gameId)
-    : downloadQueue
+    : downloadQueue).filter((item) => !pendingGameRemovals.has(item.gameId))
 
   const queued = queuedSource.map((item, index) => {
     const hasStarted = Boolean(
@@ -2065,9 +2211,11 @@ function notifyDownloadQueueChanged() {
 
 async function processNextQueuedSync() {
   if (isProcessingQueue) return
-  if (downloadQueue.length === 0) return
   if (isRestoredUserPause) return
   if (operationManager.getState() !== "IDLE") return
+
+  downloadQueue = downloadQueue.filter((q) => !pendingGameRemovals.has(q.gameId))
+  if (downloadQueue.length === 0) return
 
   const pauseOnLaunch = settingsStore.get("pauseDownloadsOnGameLaunch") !== false
   const launchStatus = gameLauncher.getLaunchStatus()
@@ -2129,6 +2277,7 @@ async function processNextQueuedSync() {
     isProcessingQueue = false
     currentProcessingItem = null
     if (operationManager.getState() === "IDLE") {
+      void processPendingGameRemovals()
       processNextQueuedSync()
     }
   }
@@ -2297,6 +2446,7 @@ async function runGameSync(ctx, payload) {
         savePersistentDownloadQueue()
       }
       notifyDownloadQueueChanged()
+      void processPendingGameRemovals()
     } else {
       savePersistentDownloadQueue()
       notifyDownloadQueueChanged()
@@ -2335,6 +2485,7 @@ async function runGameSync(ctx, payload) {
         savePersistentDownloadQueue()
         notifyDownloadQueueChanged()
       }
+      void processPendingGameRemovals()
       processNextQueuedSync()
     }
     setupInstanceWatcher(ctx.gameId, ctx.instanceRoot)
@@ -2355,6 +2506,7 @@ async function runGameSync(ctx, payload) {
       notifyDownloadQueueChanged()
     }
     if (operationManager.getState() === "IDLE") {
+      void processPendingGameRemovals()
       processNextQueuedSync()
     }
     if (isCancelled) {
@@ -2366,6 +2518,9 @@ async function runGameSync(ctx, payload) {
 
 ipcMain.handle("game-start-sync", async (_event, payload = {}) => {
   const ctx = resolveGameContext(payload)
+  if (ctx.gameId && pendingGameRemovals.has(ctx.gameId)) {
+    throw new Error(`Cannot start or resume sync for ${ctx.gameId}: game is marked for removal.`)
+  }
 
   const isRestoredTarget = Boolean(
     isRestoredUserPause &&
@@ -2753,6 +2908,7 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
         resumeProgressFloor = null
         savePersistentDownloadQueue()
         notifyDownloadQueueChanged()
+        void processPendingGameRemovals()
         processNextQueuedSync()
       }
     }
@@ -2777,6 +2933,7 @@ ipcMain.handle("game-cancel-sync", async (_event, payload = {}) => {
       autoPausedDownloadGameId = null
       savePersistentDownloadQueue()
       notifyDownloadQueueChanged()
+      void processPendingGameRemovals()
       processNextQueuedSync()
     }
   }
@@ -2791,6 +2948,9 @@ async function promoteQueuedSync(payload = {}) {
     const targetGameId = payload?.gameId || payload?.id
     if (!targetGameId) {
       throw new Error("Missing gameId to promote.")
+    }
+    if (pendingGameRemovals.has(targetGameId)) {
+      return { success: false, error: "Cannot promote: game is marked for removal." }
     }
 
     // 1. Locate the target item in downloadQueue
@@ -2970,12 +3130,20 @@ ipcMain.handle("game-get-installed-state", async (_event, payload = {}) => {
 })
 
 ipcMain.handle("game-uninstall", async (_event, payload = {}) => {
-  const ctx = resolveGameContext(payload)
-  const res = await operationManager.uninstallGame(ctx.instanceRoot, appDataRoot)
-  if (res && res.success !== false) {
-    clearGameIntegrityDirty(ctx.gameId)
+  const safePayload = {
+    ...payload,
+    gameName: payload?.gameName || (payload?.gameId ? String(payload.gameId) : undefined),
   }
-  return res
+  const ctx = resolveGameContext(safePayload)
+  const targetKey = ctx.gameId || "__legacy__"
+  pendingGameRemovals.set(targetKey, {
+    gameId: ctx.gameId,
+    gameName: ctx.gameName || ctx.gameId || null,
+  })
+  savePersistentDownloadQueue()
+  notifyDownloadQueueChanged()
+  await processPendingGameRemovals()
+  return { success: true }
 })
 
 ipcMain.handle("game-write-session", async (_event, payload = {}) => {
@@ -3234,6 +3402,8 @@ function resetDownloadQueueForTesting() {
   }
   instanceWatchers.clear()
   dirtyGameIds.clear()
+  pendingGameRemovals.clear()
+  isProcessingRemovals = false
   if (gameLauncher) {
     gameLauncher.runningGameId = null
     gameLauncher.setStatus("idle")
@@ -3270,6 +3440,7 @@ if (typeof module !== "undefined" && module.exports) {
     processNextQueuedSync,
     runGameSync,
     getGamesRoot,
+    getAppDataRoot,
     getLegacyInstanceRoot,
     getResumeProgressFloor: () => resumeProgressFloor,
     getDownloadQueue: () => downloadQueue,
@@ -3303,6 +3474,12 @@ if (typeof module !== "undefined" && module.exports) {
     getActiveOperationSnapshotForTesting: () => activeOperationSnapshot,
     setActiveOperationPayloadForTesting: (p) => {
       activeOperationPayload = p
+    },
+    getPendingGameRemovals: () => pendingGameRemovals,
+    processPendingGameRemovals,
+    resetPendingGameRemovalsForTesting: () => {
+      pendingGameRemovals.clear()
+      isProcessingRemovals = false
     },
   }
 }
