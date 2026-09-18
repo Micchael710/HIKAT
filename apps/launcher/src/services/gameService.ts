@@ -609,6 +609,7 @@ export const gameService = {
 
   async launchGame(options: {
     playerName?: string
+    playerId?: string
     ramGB?: number
     minecraftVersion?: string
     modLoader?: import("../vite-env").GameModLoader

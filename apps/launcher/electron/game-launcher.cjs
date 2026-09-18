@@ -1,5 +1,6 @@
 const path = require("path")
 const fs = require("fs")
+const crypto = require("crypto")
 const { Version, launch: xmclLaunch } = require("@xmcl/core")
 const { setJavaGpuPreference } = require("./gpu-manager.cjs")
 const { resolveJavaRuntime, validateJavaBinary } = require("./java-runtime.cjs")
@@ -7,6 +8,18 @@ const { checkCore } = require("./minecraft-core.cjs")
 
 const DEFAULT_RAM_GB = 4
 const DEFAULT_LAUNCH_TOLERANCE_MS = 30000 // 30 seconds
+
+function computeHiKatPlayerUuid(userId) {
+  if (!userId || typeof userId !== "string" || !userId.trim()) {
+    throw new Error("Cannot compute HiKAT player UUID: userId cannot be null or blank.")
+  }
+  const cleanId = userId.trim()
+  const md5 = crypto.createHash("md5").update(Buffer.from("hikat:" + cleanId, "utf8")).digest()
+  md5[6] = (md5[6] & 0x0f) | 0x30
+  md5[8] = (md5[8] & 0x3f) | 0x80
+  const hex = md5.toString("hex")
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+}
 
 function pathsMatch(pathA, pathB) {
   if (!pathA || !pathB) return false
@@ -313,7 +326,8 @@ class GameLauncher {
     gameId,
     gameName,
     instanceRoot,
-    playerName = "Player",
+    playerName,
+    playerId,
     ramGB = DEFAULT_RAM_GB,
     minecraftVersion,
     modLoader,
@@ -340,6 +354,17 @@ class GameLauncher {
     if (resolvedLoader !== "VANILLA" && !resolvedLoaderVersion) {
       throw new Error(`Cannot launch Minecraft: Missing required loader version for ${resolvedLoader}.`)
     }
+
+    if (!playerName || !String(playerName).trim()) {
+      throw new Error("Cannot launch Minecraft: Missing or empty playerName.")
+    }
+
+    if (!playerId || !String(playerId).trim()) {
+      throw new Error("Cannot launch Minecraft: Missing or empty playerId.")
+    }
+
+    const cleanPlayerName = String(playerName).trim().slice(0, 16)
+    const computedPlayerUuid = computeHiKatPlayerUuid(playerId)
 
     this.runningGameId = gameId || null
     this.runningGameName = gameName || null
@@ -425,8 +450,8 @@ class GameLauncher {
         javaPath: javawPath,
         version: resolvedVersion,
         gameProfile: {
-          name: String(playerName || "Player").slice(0, 16),
-          id: "00000000-0000-0000-0000-000000000000",
+          name: cleanPlayerName,
+          id: computedPlayerUuid,
         },
         minMemory: minMemoryMb,
         maxMemory: maxMemoryMb,
@@ -511,6 +536,7 @@ class GameLauncher {
 
 module.exports = {
   GameLauncher,
+  computeHiKatPlayerUuid,
   pathsMatch,
   defaultProcessChecker,
   defaultProcessInfoFetcher,

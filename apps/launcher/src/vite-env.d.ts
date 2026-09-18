@@ -198,6 +198,7 @@ interface ElectronAPI {
   }) => Promise<{ success: boolean }>
   launchGame?: (options: {
     playerName?: string
+    playerId?: string
     ramGB?: number
     minecraftVersion?: string
     modLoader?: GameModLoader

@@ -182,6 +182,7 @@ describe("Launcher Multi-Loader Core & Lifecycle Suite", () => {
 
       await launcher.launch({
         playerName: "VanillaPlayer",
+        playerId: "player-test",
         minecraftVersion: "1.21.1",
         modLoader: "VANILLA",
       })

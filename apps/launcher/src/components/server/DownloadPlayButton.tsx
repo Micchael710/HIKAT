@@ -1790,10 +1790,12 @@ export default function DownloadPlayButton({
 
       const currentUser = authService.getUser()
       const rawDisplayName = currentUser?.displayName
+      const rawUserId = currentUser?.id
       const playerName = typeof rawDisplayName === "string" ? rawDisplayName.trim() : ""
+      const playerId = typeof rawUserId === "string" ? rawUserId.trim() : ""
 
-      if (!playerName) {
-        showToast("No se pudo iniciar el juego: no se encontró un nombre de usuario válido.", "error")
+      if (!playerName || !playerId) {
+        showToast("No se pudo iniciar el juego: no se encontró un usuario válido.", "error")
         return
       }
 
@@ -1839,6 +1841,7 @@ export default function DownloadPlayButton({
       try {
         await gameService.launchGame({
           playerName,
+          playerId,
           minecraftVersion: playManifest.minecraftVersion,
           modLoader: playManifest.modLoader,
           modLoaderVersion: playManifest.modLoaderVersion,

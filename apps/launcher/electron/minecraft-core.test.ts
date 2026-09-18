@@ -413,6 +413,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
 
     const result = await launcher.launch({
       playerName: "TestPlayer",
+      playerId: "test-player-id",
       ramGB: 4,
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
@@ -445,6 +446,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
 
     await launcher.launch({
       playerName: "TestPlayer",
+      playerId: "test-player-id",
       ramGB: 4,
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
@@ -542,6 +544,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
 
     const result = await launcher.launch({
       playerName: "TestPlayer",
+      playerId: "test-player-id",
       ramGB: 4,
       minecraftVersion: "1.21.1",
       neoForgeVersion: "21.1.65",
@@ -1751,6 +1754,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
 
       await launcher.launch({
         playerName: "PlayerOne",
+        playerId: "test-player-id",
         minecraftVersion: "1.21.1",
         modLoader: "VANILLA",
       })
@@ -1798,6 +1802,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
 
       await launcher.launch({
         playerName: "PlayerOne",
+        playerId: "test-player-id",
         minecraftVersion: "1.21.1",
         modLoader: "VANILLA",
       })
@@ -1845,6 +1850,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
 
       await launcher.launch({
         playerName: "PlayerOne",
+        playerId: "test-player-id",
         minecraftVersion: "1.21.1",
         modLoader: "VANILLA",
       })
@@ -1893,6 +1899,7 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
 
       await launcher.launch({
         playerName: "PlayerOne",
+        playerId: "test-player-id",
         minecraftVersion: "1.21.1",
         modLoader: "VANILLA",
       })
