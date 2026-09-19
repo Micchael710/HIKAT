@@ -2,11 +2,17 @@ const electron = require("electron")
 const app = electron && typeof electron === "object" && electron.app ? electron.app : electron
 const { getEffectiveApiBaseUrl } = require("./client-files-sync.cjs")
 
-function getUpdateFeedUrl() {
+function getUpdateFeedUrl(customIsPackaged = null) {
   if (process.env.HIKAT_UPDATE_URL && process.env.HIKAT_UPDATE_URL.trim()) {
     return process.env.HIKAT_UPDATE_URL.trim().replace(/\/+$/, "")
   }
-  const apiBase = getEffectiveApiBaseUrl()
+  const isPackaged =
+    typeof customIsPackaged === "boolean"
+      ? customIsPackaged
+      : app && typeof app === "object" && typeof app.isPackaged === "boolean"
+        ? app.isPackaged
+        : undefined
+  const apiBase = getEffectiveApiBaseUrl(isPackaged)
   return `${apiBase.replace(/\/+$/, "")}/launcher/update`
 }
 
@@ -25,6 +31,10 @@ function getUpdateFeedUrl() {
 function runLauncherUpdateBootstrap(splashWindow, customUpdater = null, customApp = null) {
   return new Promise((resolve) => {
     const currentApp = customApp || app
+    const isPackaged =
+      currentApp && typeof currentApp === "object" && typeof currentApp.isPackaged === "boolean"
+        ? currentApp.isPackaged
+        : undefined
 
     // In unpackaged development environment, skip update check unless explicitly forced for testing
     if (currentApp && !currentApp.isPackaged && !process.env.FORCE_LAUNCHER_AUTO_UPDATE) {
@@ -32,7 +42,7 @@ function runLauncherUpdateBootstrap(splashWindow, customUpdater = null, customAp
       return resolve({ updated: false, reason: "dev_mode" })
     }
 
-    const feedUrl = getUpdateFeedUrl()
+    const feedUrl = getUpdateFeedUrl(isPackaged)
     console.log(`[AutoUpdater] Initializing auto-updater with feed URL: ${feedUrl}`)
 
     let isResolved = false

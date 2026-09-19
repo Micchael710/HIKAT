@@ -26,17 +26,30 @@ async function calculateFileSha256(filePath) {
 
 /**
  * Resolves effective API base URL.
- * In development (NODE_ENV !== "production"): defaults to http://127.0.0.1:8787 unless overridden.
- * In production (NODE_ENV === "production"): defaults to https://api.hikat.org.
+ * Order of precedence:
+ * 1. Explicit environment override (HIKAT_API_URL, VITE_API_URL, VITE_BACKEND_API_URL).
+ * 2. When isPackaged is boolean:
+ *    - isPackaged === true  -> https://api.hikat.org
+ *    - isPackaged === false -> http://127.0.0.1:8787
+ * 3. Fallback when isPackaged is omitted/undefined:
+ *    - In production (NODE_ENV === "production") -> https://api.hikat.org
+ *    - Otherwise -> http://127.0.0.1:8787
+ *
+ * @param {boolean} [isPackaged]
+ * @returns {string}
  */
-function getEffectiveApiBaseUrl() {
+function getEffectiveApiBaseUrl(isPackaged) {
   const envUrl =
     process.env.HIKAT_API_URL ||
     process.env.VITE_API_URL ||
     process.env.VITE_BACKEND_API_URL
 
   if (envUrl && typeof envUrl === "string" && envUrl.trim()) {
-    return envUrl.trim().replace(/\/$/, "")
+    return envUrl.trim().replace(/\/+$/, "")
+  }
+
+  if (typeof isPackaged === "boolean") {
+    return isPackaged ? DEFAULT_API_BASE_URL : "http://127.0.0.1:8787"
   }
 
   if (process.env.NODE_ENV !== "production") {

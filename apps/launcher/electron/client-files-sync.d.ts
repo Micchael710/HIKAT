@@ -75,7 +75,7 @@ export declare function getDeterministicStagingFileName(task: any): string
 export declare function calculateFileSha256(filePath: string): Promise<string>
 export declare function resolveAndValidateDownloadUrl(rawUrl: string, apiBaseUrl?: string): string
 export declare function validateUrlSecurity(parsedUrl: URL): boolean
-export declare function getEffectiveApiBaseUrl(): string
+export declare function getEffectiveApiBaseUrl(isPackaged?: boolean): string
 export declare function uninstallGame(instanceRoot: string, gamesRoot: string): Promise<{ success: boolean }>
 export declare function resolvePathPolicy(
   relPath: string,

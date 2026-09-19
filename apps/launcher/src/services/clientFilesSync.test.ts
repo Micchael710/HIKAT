@@ -956,7 +956,7 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       await expect(uninstallGame("C:\\", appDataRoot)).rejects.toThrow(/Security violation/i)
     })
 
-    it("20. getEffectiveApiBaseUrl returns local backend (http://127.0.0.1:8787) in development and production default in production", () => {
+    it("20. getEffectiveApiBaseUrl resolves using isPackaged state and respects explicit overrides", () => {
       const origEnv = process.env.NODE_ENV
       const origHikatApi = process.env.HIKAT_API_URL
       const origViteApi = process.env.VITE_API_URL
@@ -966,14 +966,24 @@ describe("Shard 8E: Launcher Sync Engine & Filesystem Authority Tests", () => {
       delete process.env.VITE_BACKEND_API_URL
 
       try {
+        // 1. Packaged without overrides -> https://api.hikat.org (even if NODE_ENV is development)
+        process.env.NODE_ENV = "development"
+        expect(getEffectiveApiBaseUrl(true)).toBe("https://api.hikat.org")
+
+        // 2. Unpackaged without overrides -> http://127.0.0.1:8787 (even if NODE_ENV is production)
+        process.env.NODE_ENV = "production"
+        expect(getEffectiveApiBaseUrl(false)).toBe("http://127.0.0.1:8787")
+
+        // 3. Fallback when isPackaged is omitted
         process.env.NODE_ENV = "development"
         expect(getEffectiveApiBaseUrl()).toBe("http://127.0.0.1:8787")
-
         process.env.NODE_ENV = "production"
         expect(getEffectiveApiBaseUrl()).toBe("https://api.hikat.org")
 
-        // Override takes precedence
+        // 4. Explicit override takes precedence in both packaged and unpackaged states
         process.env.HIKAT_API_URL = "http://localhost:9999"
+        expect(getEffectiveApiBaseUrl(true)).toBe("http://localhost:9999")
+        expect(getEffectiveApiBaseUrl(false)).toBe("http://localhost:9999")
         expect(getEffectiveApiBaseUrl()).toBe("http://localhost:9999")
       } finally {
         process.env.NODE_ENV = origEnv

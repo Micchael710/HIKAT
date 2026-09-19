@@ -41,25 +41,37 @@ describe("HiKAT Launcher Auto-Updater Service Suite", () => {
   })
 
   describe("1. Feed URL Resolution", () => {
-    it("returns default production feed URL when in production mode without override", () => {
+    it("returns default production feed URL when packaged without overrides", () => {
       delete process.env.HIKAT_UPDATE_URL
       delete process.env.HIKAT_API_URL
       delete process.env.VITE_API_URL
       delete process.env.VITE_BACKEND_API_URL
-      process.env.NODE_ENV = "production"
+      process.env.NODE_ENV = "development" // Even if NODE_ENV is development
 
-      expect(getUpdateFeedUrl()).toBe("https://api.hikat.org/launcher/update")
+      expect(getUpdateFeedUrl(true)).toBe("https://api.hikat.org/launcher/update")
     })
 
-    it("respects explicit HIKAT_UPDATE_URL environment override", () => {
+    it("returns local development feed URL when unpackaged without overrides", () => {
+      delete process.env.HIKAT_UPDATE_URL
+      delete process.env.HIKAT_API_URL
+      delete process.env.VITE_API_URL
+      delete process.env.VITE_BACKEND_API_URL
+      process.env.NODE_ENV = "production" // Even if NODE_ENV is production
+
+      expect(getUpdateFeedUrl(false)).toBe("http://127.0.0.1:8787/launcher/update")
+    })
+
+    it("respects explicit HIKAT_UPDATE_URL environment override in both packaged and dev modes", () => {
       process.env.HIKAT_UPDATE_URL = "http://localhost:8787/launcher/update/"
-      expect(getUpdateFeedUrl()).toBe("http://localhost:8787/launcher/update")
+      expect(getUpdateFeedUrl(true)).toBe("http://localhost:8787/launcher/update")
+      expect(getUpdateFeedUrl(false)).toBe("http://localhost:8787/launcher/update")
     })
 
-    it("derives update feed URL from VITE_API_URL if HIKAT_UPDATE_URL is not set", () => {
+    it("derives update feed URL from VITE_API_URL / HIKAT_API_URL in both packaged and dev modes", () => {
       delete process.env.HIKAT_UPDATE_URL
       process.env.VITE_API_URL = "http://127.0.0.1:8787"
-      expect(getUpdateFeedUrl()).toBe("http://127.0.0.1:8787/launcher/update")
+      expect(getUpdateFeedUrl(true)).toBe("http://127.0.0.1:8787/launcher/update")
+      expect(getUpdateFeedUrl(false)).toBe("http://127.0.0.1:8787/launcher/update")
     })
   })
 
