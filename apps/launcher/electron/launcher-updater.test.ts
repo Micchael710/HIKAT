@@ -41,12 +41,14 @@ describe("HiKAT Launcher Auto-Updater Service Suite", () => {
   })
 
   describe("1. Feed URL Resolution", () => {
-    it("returns default production feed URL when no environment override is provided", () => {
+    it("returns default production feed URL when in production mode without override", () => {
       delete process.env.HIKAT_UPDATE_URL
+      delete process.env.HIKAT_API_URL
       delete process.env.VITE_API_URL
       delete process.env.VITE_BACKEND_API_URL
+      process.env.NODE_ENV = "production"
 
-      expect(getUpdateFeedUrl()).toBe("https://api.hikat.xyz/launcher/update")
+      expect(getUpdateFeedUrl()).toBe("https://api.hikat.org/launcher/update")
     })
 
     it("respects explicit HIKAT_UPDATE_URL environment override", () => {
@@ -148,7 +150,7 @@ describe("HiKAT Launcher Auto-Updater Service Suite", () => {
 
       const result = await promise
       expect(result.updated).toBe(true)
-      expect(mockUpdater.quitAndInstall).toHaveBeenCalledWith(false, true)
+      expect(mockUpdater.quitAndInstall).toHaveBeenCalledWith(true, true)
 
       vi.useRealTimers()
     })

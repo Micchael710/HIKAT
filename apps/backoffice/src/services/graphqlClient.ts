@@ -33,6 +33,10 @@ import { authService } from "./authService"
 const BACKEND_URL = import.meta.env.VITE_BACKEND_API_URL || "http://127.0.0.1:8787"
 const GRAPHQL_ENDPOINT = `${BACKEND_URL}/graphql`
 
+export function getBackendBaseUrl(): string {
+  return BACKEND_URL.replace(/\/+$/, "")
+}
+
 export function resolveMediaUrl(url?: string | null): string {
   if (!url || typeof url !== "string" || !url.trim()) return ""
   const trimmed = url.trim()

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react"
 import type { ThemeMode, LauncherReleaseItem } from "../../types"
-import { graphqlClient } from "../../services/graphqlClient"
+import { graphqlClient, getBackendBaseUrl } from "../../services/graphqlClient"
 import { uploadLauncherRelease, LauncherUploadProgress } from "../../services/launcherUploadService"
 import { getThemeTokens } from "../../theme/tokens"
 import {
@@ -161,10 +161,8 @@ export default function LauncherReleasesView({ theme }: LauncherReleasesViewProp
   }
 
   const getDownloadUrl = (filename: string) => {
-    const backendUrl = import.meta.env.VITE_GRAPHQL_ENDPOINT
-      ? new URL(import.meta.env.VITE_GRAPHQL_ENDPOINT).origin
-      : window.location.origin
-    return `${backendUrl}/launcher/update/download/${encodeURIComponent(filename)}`
+    const backendBase = getBackendBaseUrl()
+    return `${backendBase}/launcher/update/download/${encodeURIComponent(filename)}`
   }
 
   return (

@@ -197,7 +197,7 @@ describe("HiKAT Launcher Auto-Update & Release Management Suite", () => {
   describe("4. HTTP Update Transport (electron-updater compatibility)", () => {
     it("serves 404 for latest.yml when no release is published", async () => {
       const res = await handleLatestYaml(
-        new Request("https://api.hikat.xyz/launcher/update/latest.yml"),
+        new Request("https://api.hikat.org/launcher/update/latest.yml"),
         env,
         db,
       )
@@ -221,7 +221,7 @@ describe("HiKAT Launcher Auto-Update & Release Management Suite", () => {
       await publishLauncherRelease(db, r.id)
 
       const res = await handleLatestYaml(
-        new Request("https://api.hikat.xyz/launcher/update/latest.yml"),
+        new Request("https://api.hikat.org/launcher/update/latest.yml"),
         env,
         db,
       )
@@ -239,7 +239,7 @@ describe("HiKAT Launcher Auto-Update & Release Management Suite", () => {
 
     it("rejects invalid path traversal attempts with 403 Forbidden", async () => {
       const res = await handleLauncherBinaryDownload(
-        new Request("https://api.hikat.xyz/launcher/update/download/..%2F..%2Fsecret.exe"),
+        new Request("https://api.hikat.org/launcher/update/download/..%2F..%2Fsecret.exe"),
         env,
         db,
         "..%2F..%2Fsecret.exe",
@@ -263,7 +263,7 @@ describe("HiKAT Launcher Auto-Update & Release Management Suite", () => {
 
       // In DRAFT status
       const res = await handleLauncherBinaryDownload(
-        new Request("https://api.hikat.xyz/launcher/update/download/HiKAT%20Launcher%20Setup%202.0.0.exe"),
+        new Request("https://api.hikat.org/launcher/update/download/HiKAT%20Launcher%20Setup%202.0.0.exe"),
         env,
         db,
         "HiKAT%20Launcher%20Setup%202.0.0.exe",
@@ -288,7 +288,7 @@ describe("HiKAT Launcher Auto-Update & Release Management Suite", () => {
       await publishLauncherRelease(db, r.id)
 
       const res = await handleLauncherBinaryDownload(
-        new Request("https://api.hikat.xyz/launcher/update/download/HiKAT%20Launcher%20Setup%201.0.0.exe"),
+        new Request("https://api.hikat.org/launcher/update/download/HiKAT%20Launcher%20Setup%201.0.0.exe"),
         env,
         db,
         "HiKAT Launcher Setup 1.0.0.exe",
@@ -318,7 +318,7 @@ describe("HiKAT Launcher Auto-Update & Release Management Suite", () => {
       await publishLauncherRelease(db, r.id)
 
       const req = new Request(
-        "https://api.hikat.xyz/launcher/update/download/HiKAT%20Launcher%20Setup%201.0.0.exe",
+        "https://api.hikat.org/launcher/update/download/HiKAT%20Launcher%20Setup%201.0.0.exe",
         { headers: { Range: "bytes=2-5" } },
       )
       const res = await handleLauncherBinaryDownload(req, env, db, "HiKAT Launcher Setup 1.0.0.exe")

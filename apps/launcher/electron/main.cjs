@@ -10,7 +10,9 @@ const { SettingsStore } = require("./settings-store.cjs")
 const { SecureAuthStore } = require("./secure-auth-store.cjs")
 const { parseValidOAuthCallbackUrl } = require("./url-utils.cjs")
 const { runLauncherUpdateBootstrap } = require("./launcher-updater.cjs")
-let updateCheckPromise = null
+let isStartupBootstrapActive = false
+let isCreatingWindow = false
+let splashStartTime = 0
 
 // Single instance lock to prevent duplicate launcher instances and focus existing instance
 const singleInstanceLock = app.requestSingleInstanceLock()
@@ -631,37 +633,52 @@ function checkServer(url, timeout = 500) {
 }
 
 function createSplashWindow() {
-  const { width: splashW, height: splashH } = getOptimalSplashSize()
-  const appIcon = getLauncherIcon()
-
-  splashWindow = new BrowserWindow({
-    width: splashW,
-    height: splashH,
-    icon: appIcon,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    maximizable: false,
-    minimizable: false,
-    center: true,
-    show: false,
-    skipTaskbar: false,
-    backgroundColor: "#00000000",
-    hasShadow: false,
-    webPreferences: {
-      devTools: false,
-      contextIsolation: true,
-      preload: path.join(__dirname, "splash-preload.cjs"),
-    },
-  })
-
-  splashWindow.loadFile(path.join(__dirname, "splash.html"))
-
-  splashWindow.once("ready-to-show", () => {
+  return new Promise((resolve) => {
     if (splashWindow && !splashWindow.isDestroyed()) {
-      splashWindow.show()
-      updateCheckPromise = runLauncherUpdateBootstrap(splashWindow)
+      return resolve(splashWindow)
     }
+
+    const { width: splashW, height: splashH } = getOptimalSplashSize()
+    const appIcon = getLauncherIcon()
+    splashStartTime = Date.now()
+
+    splashWindow = new BrowserWindow({
+      width: splashW,
+      height: splashH,
+      icon: appIcon,
+      frame: false,
+      transparent: true,
+      resizable: false,
+      maximizable: false,
+      minimizable: false,
+      center: true,
+      show: false,
+      skipTaskbar: false,
+      backgroundColor: "#00000000",
+      hasShadow: false,
+      webPreferences: {
+        devTools: false,
+        contextIsolation: true,
+        preload: path.join(__dirname, "splash-preload.cjs"),
+      },
+    })
+
+    splashWindow.loadFile(path.join(__dirname, "splash.html"))
+
+    let isDone = false
+    const onReady = () => {
+      if (isDone) return
+      isDone = true
+      if (splashWindow && !splashWindow.isDestroyed()) {
+        splashWindow.show()
+      }
+      resolve(splashWindow)
+    }
+
+    splashWindow.once("ready-to-show", onReady)
+
+    // Fallback if ready-to-show is delayed
+    setTimeout(onReady, 2000)
   })
 }
 
@@ -669,7 +686,9 @@ function focusMainWindow() {
   const wasHiddenByGameLaunch = hiddenByGameLaunch
   hiddenByGameLaunch = false
   if (!mainWindow || mainWindow.isDestroyed()) {
-    createWindow()
+    if (!isStartupBootstrapActive && !isCreatingWindow) {
+      createWindow()
+    }
     return
   }
   if (!mainWindow.isVisible()) {
@@ -740,127 +759,124 @@ function destroyTray() {
 }
 
 async function createWindow() {
-  const { width: defaultWidth, height: defaultHeight } = getOptimalWindowSize()
-  const appIcon = getLauncherIcon()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    focusMainWindow()
+    return
+  }
+  if (isCreatingWindow) {
+    return
+  }
+  isCreatingWindow = true
 
-  mainWindow = new BrowserWindow({
-    title: "HiKAT Launcher",
-    icon: appIcon,
-    width: defaultWidth,
-    height: defaultHeight,
-    minWidth: defaultWidth,
-    minHeight: defaultHeight,
-    resizable: false,
-    maximizable: true,
-    center: true,
-    frame: false, // frameless window for custom Titlebar
-    titleBarStyle: "hidden",
-    backgroundColor: "#090d12",
-    show: false,
-    autoHideMenuBar: true,
-    webPreferences: {
-      preload: path.join(__dirname, "preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      devTools: true,
-    },
-  })
+  try {
+    const { width: defaultWidth, height: defaultHeight } = getOptimalWindowSize()
+    const appIcon = getLauncherIcon()
 
-  mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
+    mainWindow = new BrowserWindow({
+      title: "HiKAT Launcher",
+      icon: appIcon,
+      width: defaultWidth,
+      height: defaultHeight,
+      minWidth: defaultWidth,
+      minHeight: defaultHeight,
+      resizable: false,
+      maximizable: true,
+      center: true,
+      frame: false, // frameless window for custom Titlebar
+      titleBarStyle: "hidden",
+      backgroundColor: "#090d12",
+      show: false,
+      autoHideMenuBar: true,
+      webPreferences: {
+        preload: path.join(__dirname, "preload.cjs"),
+        contextIsolation: true,
+        nodeIntegration: false,
+        devTools: true,
+      },
+    })
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("http://") || url.startsWith("https://")) {
-      shell.openExternal(url)
-    }
-    return { action: "deny" }
-  })
+    mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
 
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (url !== mainWindow.webContents.getURL()) {
-      event.preventDefault()
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
       if (url.startsWith("http://") || url.startsWith("https://")) {
         shell.openExternal(url)
       }
+      return { action: "deny" }
+    })
+
+    mainWindow.webContents.on("will-navigate", (event, url) => {
+      if (url !== mainWindow.webContents.getURL()) {
+        event.preventDefault()
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+          shell.openExternal(url)
+        }
+      }
+    })
+
+    mainWindow.on("close", (event) => {
+      if (isQuitRequested) {
+        return
+      }
+      if (minimizeToTrayEnabled) {
+        event.preventDefault()
+        ensureTray()
+        mainWindow.hide()
+      }
+    })
+
+    mainWindow.on("closed", () => {
+      mainWindow = null
+    })
+
+    const distPath = path.join(__dirname, "../dist/index.html")
+    const devUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:8443"
+
+    const isServerLive = await checkServer(devUrl, 600)
+
+    if (isServerLive) {
+      mainWindow.loadURL(devUrl)
+    } else {
+      mainWindow.loadFile(distPath)
     }
-  })
 
-  mainWindow.on("close", (event) => {
-    if (isQuitRequested) {
-      return
-    }
-    if (minimizeToTrayEnabled) {
-      event.preventDefault()
-      ensureTray()
-      mainWindow.hide()
-    }
-  })
+    mainWindow.webContents.on("did-fail-load", () => {
+      mainWindow.loadFile(distPath)
+    })
 
-  mainWindow.on("closed", () => {
-    mainWindow = null
-  })
+    mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+      const levelName = level === 3 ? "ERROR" : level === 2 ? "WARN" : "INFO"
+      console.log(`[Renderer ${levelName}] ${message} (${path.basename(sourceId || "")}:${line})`)
+    })
 
-  const distPath = path.join(__dirname, "../dist/index.html")
-  const devUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:8443"
+    mainWindow.once("ready-to-show", () => {
+      const MIN_SPLASH_TIME = 3800
+      const elapsed = splashStartTime > 0 ? Date.now() - splashStartTime : MIN_SPLASH_TIME
+      const remainingTime = splashWindow && !splashWindow.isDestroyed() ? Math.max(0, MIN_SPLASH_TIME - elapsed) : 0
 
-  const isServerLive = await checkServer(devUrl, 600)
+      setTimeout(() => {
+        if (splashWindow && !splashWindow.isDestroyed()) {
+          splashWindow.close()
+          splashWindow = null
+        }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.show()
+          mainWindow.focus()
+          processNextQueuedSync()
+        }
+      }, remainingTime)
+    })
 
-  if (isServerLive) {
-    mainWindow.loadURL(devUrl)
-  } else {
-    mainWindow.loadFile(distPath)
+    mainWindow.on("maximize", () => {
+      mainWindow.webContents.send("window-maximize-changed", true)
+    })
+
+    mainWindow.on("unmaximize", () => {
+      mainWindow.setResizable(false)
+      mainWindow.webContents.send("window-maximize-changed", false)
+    })
+  } finally {
+    isCreatingWindow = false
   }
-
-  mainWindow.webContents.on("did-fail-load", () => {
-    mainWindow.loadFile(distPath)
-  })
-
-  mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    const levelName = level === 3 ? "ERROR" : level === 2 ? "WARN" : "INFO"
-    console.log(`[Renderer ${levelName}] ${message} (${path.basename(sourceId || "")}:${line})`)
-  })
-
-  const startTime = Date.now()
-  const MIN_SPLASH_TIME = 3800
-
-  mainWindow.once("ready-to-show", async () => {
-    let updateResult = { updated: false }
-    if (splashWindow && !splashWindow.isDestroyed() && updateCheckPromise) {
-      try {
-        updateResult = await updateCheckPromise
-      } catch (err) {
-        console.warn("[AutoUpdater] Error awaiting update bootstrap:", err)
-      }
-    }
-
-    if (updateResult && updateResult.updated) {
-      console.log("[AutoUpdater] Update downloaded and relaunch initiated. Suppressing main window presentation.")
-      return
-    }
-
-    const elapsed = Date.now() - startTime
-    const remainingTime = Math.max(0, MIN_SPLASH_TIME - elapsed)
-
-    setTimeout(() => {
-      if (splashWindow && !splashWindow.isDestroyed()) {
-        splashWindow.close()
-        splashWindow = null
-      }
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.show()
-        mainWindow.focus()
-        processNextQueuedSync()
-      }
-    }, remainingTime)
-  })
-
-  mainWindow.on("maximize", () => {
-    mainWindow.webContents.send("window-maximize-changed", true)
-  })
-
-  mainWindow.on("unmaximize", () => {
-    mainWindow.setResizable(false)
-    mainWindow.webContents.send("window-maximize-changed", false)
-  })
 }
 
 let pendingDeepLinkUrl = null
@@ -3288,17 +3304,36 @@ ipcMain.handle("game-get-runtime-info", async (_event, payload = {}) => {
   return { javaMajorVersion: null }
 })
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   try {
     app.setAppUserModelId("com.hikat.launcher")
   } catch (_) { }
+
+  isStartupBootstrapActive = true
+
+  try {
+    await createSplashWindow()
+
+    let updateResult = { updated: false }
+    try {
+      updateResult = await runLauncherUpdateBootstrap(splashWindow)
+    } catch (updaterErr) {
+      console.warn("[AutoUpdater] Update check failed (continuing normally):", updaterErr)
+    }
+
+    if (updateResult && updateResult.updated) {
+      console.log("[AutoUpdater] Update downloaded; restart initiated. Halting normal startup.")
+      return
+    }
+  } finally {
+    isStartupBootstrapActive = false
+  }
 
   startOAuthLoopbackServer()
   setupInstanceWatcher()
   void processPendingGameRemovals()
 
-  createSplashWindow()
-  createWindow()
+  await createWindow()
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

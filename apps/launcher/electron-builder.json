@@ -9,7 +9,7 @@
   },
   "publish": {
     "provider": "generic",
-    "url": "https://api.hikat.xyz/launcher/update"
+    "url": "https://api.hikat.org/launcher/update"
   },
   "files": [
     "dist/**/*",

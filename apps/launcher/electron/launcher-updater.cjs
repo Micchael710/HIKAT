@@ -1,16 +1,15 @@
 const electron = require("electron")
 const app = electron && typeof electron === "object" && electron.app ? electron.app : electron
+const { getEffectiveApiBaseUrl } = require("./client-files-sync.cjs")
 
 function getUpdateFeedUrl() {
   if (process.env.HIKAT_UPDATE_URL && process.env.HIKAT_UPDATE_URL.trim()) {
     return process.env.HIKAT_UPDATE_URL.trim().replace(/\/+$/, "")
   }
-  const baseApi = process.env.VITE_API_URL || process.env.VITE_BACKEND_API_URL
-  if (baseApi && baseApi.trim()) {
-    return `${baseApi.trim().replace(/\/+$/, "")}/launcher/update`
-  }
-  return "https://api.hikat.xyz/launcher/update"
+  const apiBase = getEffectiveApiBaseUrl()
+  return `${apiBase.replace(/\/+$/, "")}/launcher/update`
 }
+
 
 /**
  * Executes the auto-update lifecycle during splash presentation.
@@ -139,8 +138,8 @@ function runLauncherUpdateBootstrap(splashWindow, customUpdater = null, customAp
         setTimeout(() => {
           console.log("[AutoUpdater] Executing quitAndInstall...")
           try {
-            // isSilent = false (runs installer), isForceRunAfter = true (relaunches app)
-            autoUpdater.quitAndInstall(false, true)
+            // isSilent = true (silent install), isForceRunAfter = true (relaunches app)
+            autoUpdater.quitAndInstall(true, true)
           } catch (quitErr) {
             console.error("[AutoUpdater] Error during quitAndInstall:", quitErr)
             app.quit()
