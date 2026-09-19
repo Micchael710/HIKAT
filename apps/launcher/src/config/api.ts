@@ -9,7 +9,10 @@
  */
 
 export const DEFAULT_DEV_API_BASE_URL = "http://127.0.0.1:8787"
-export const DEFAULT_PROD_API_BASE_URL = "https://api.apparatia.net/api/v1"
+export const DEFAULT_PROD_API_BASE_URL = "https://api.hikat.org"
+
+export const DEFAULT_DEV_AUTH_BASE_URL = "http://localhost:8788"
+export const DEFAULT_PROD_AUTH_BASE_URL = "https://auth.hikat.org"
 
 /**
  * Returns the authoritative base API URL for the renderer.
@@ -17,7 +20,7 @@ export const DEFAULT_PROD_API_BASE_URL = "https://api.apparatia.net/api/v1"
  * Rules:
  * 1. Explicit override via VITE_API_URL or VITE_BACKEND_API_URL takes precedence.
  * 2. Development mode (import.meta.env.DEV or import.meta.env.MODE === 'development') defaults to http://127.0.0.1:8787.
- * 3. Packaged production build defaults to https://api.apparatia.net/api/v1.
+ * 3. Packaged production build defaults to https://api.hikat.org.
  */
 export function getApiBaseUrl(): string {
   const override =
@@ -39,6 +42,34 @@ export function getApiBaseUrl(): string {
   }
 
   return DEFAULT_PROD_API_BASE_URL
+}
+
+/**
+ * Returns the authoritative base Auth Service URL for the renderer.
+ *
+ * Rules:
+ * 1. Explicit override via VITE_AUTH_API_URL takes precedence.
+ * 2. Development mode defaults to http://localhost:8788.
+ * 3. Packaged production build defaults to https://auth.hikat.org.
+ */
+export function getAuthBaseUrl(): string {
+  const override = import.meta.env?.VITE_AUTH_API_URL
+
+  if (override && typeof override === "string" && override.trim()) {
+    return override.trim().replace(/\/+$/, "")
+  }
+
+  const isDev = Boolean(
+    import.meta.env?.DEV ||
+    import.meta.env?.MODE === "development" ||
+    (typeof process !== "undefined" && process.env?.NODE_ENV === "development")
+  )
+
+  if (isDev) {
+    return DEFAULT_DEV_AUTH_BASE_URL
+  }
+
+  return DEFAULT_PROD_AUTH_BASE_URL
 }
 
 /**

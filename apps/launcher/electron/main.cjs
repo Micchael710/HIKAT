@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, nativeImage, shell, Tray, Menu } = require("electron")
+const { app, BrowserWindow, ipcMain, screen, nativeImage, shell, Tray, Menu, session } = require("electron")
 const path = require("path")
 const http = require("http")
 const fs = require("fs")
@@ -10,6 +10,7 @@ const { SettingsStore } = require("./settings-store.cjs")
 const { SecureAuthStore } = require("./secure-auth-store.cjs")
 const { parseValidOAuthCallbackUrl } = require("./url-utils.cjs")
 const { runLauncherUpdateBootstrap } = require("./launcher-updater.cjs")
+const { DEV_CSP, PROD_CSP } = require("./csp.cjs")
 let isStartupBootstrapActive = false
 let isCreatingWindow = false
 let splashStartTime = 0
@@ -659,6 +660,8 @@ function createSplashWindow() {
       webPreferences: {
         devTools: false,
         contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
         preload: path.join(__dirname, "splash-preload.cjs"),
       },
     })
@@ -791,9 +794,28 @@ async function createWindow() {
         preload: path.join(__dirname, "preload.cjs"),
         contextIsolation: true,
         nodeIntegration: false,
-        devTools: true,
+        sandbox: true,
+        devTools: !app.isPackaged,
       },
     })
+
+    if (app.isPackaged) {
+      mainWindow.setMenu(null)
+
+      // Prevent opening DevTools via shortcuts in production (F12, Ctrl+Shift+I, etc.)
+      mainWindow.webContents.on("before-input-event", (event, input) => {
+        if (
+          input.key === "F12" ||
+          ((input.control || input.meta) && input.shift && ["I", "i", "J", "j", "C", "c"].includes(input.key))
+        ) {
+          event.preventDefault()
+        }
+      })
+
+      mainWindow.webContents.on("devtools-opened", () => {
+        mainWindow.webContents.closeDevTools()
+      })
+    }
 
     mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
 
@@ -829,24 +851,32 @@ async function createWindow() {
     })
 
     const distPath = path.join(__dirname, "../dist/index.html")
-    const devUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:8443"
 
-    const isServerLive = await checkServer(devUrl, 600)
-
-    if (isServerLive) {
-      mainWindow.loadURL(devUrl)
-    } else {
+    // In packaged production, never probe or connect to Vite dev server; load dist directly
+    if (app.isPackaged) {
       mainWindow.loadFile(distPath)
+    } else {
+      const devUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:8443"
+      const isServerLive = await checkServer(devUrl, 600)
+
+      if (isServerLive) {
+        mainWindow.loadURL(devUrl)
+      } else {
+        mainWindow.loadFile(distPath)
+      }
     }
 
     mainWindow.webContents.on("did-fail-load", () => {
       mainWindow.loadFile(distPath)
     })
 
-    mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-      const levelName = level === 3 ? "ERROR" : level === 2 ? "WARN" : "INFO"
-      console.log(`[Renderer ${levelName}] ${message} (${path.basename(sourceId || "")}:${line})`)
-    })
+    // Forward renderer console messages strictly in development
+    if (!app.isPackaged) {
+      mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+        const levelName = level === 3 ? "ERROR" : level === 2 ? "WARN" : "INFO"
+        console.log(`[Renderer ${levelName}] ${message} (${path.basename(sourceId || "")}:${line})`)
+      })
+    }
 
     mainWindow.once("ready-to-show", () => {
       const MIN_SPLASH_TIME = 3800
@@ -3305,6 +3335,23 @@ ipcMain.handle("game-get-runtime-info", async (_event, payload = {}) => {
 })
 
 app.whenReady().then(async () => {
+  if (app.isPackaged) {
+    Menu.setApplicationMenu(null)
+  }
+
+  if (session && session.defaultSession) {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      const isProd = app.isPackaged || process.env.NODE_ENV === "production"
+      const csp = isProd ? PROD_CSP : DEV_CSP
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          "Content-Security-Policy": [csp],
+        },
+      })
+    })
+  }
+
   try {
     app.setAppUserModelId("com.hikat.launcher")
   } catch (_) { }

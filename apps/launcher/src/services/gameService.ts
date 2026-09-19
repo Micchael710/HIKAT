@@ -98,6 +98,15 @@ function connectSharedReleaseSocket() {
   if (releaseEventListeners.size === 0) return
   if (sharedReleaseSocket) return
 
+  if (
+    typeof process !== "undefined" &&
+    process.env.VITEST &&
+    !(globalThis as any).WebSocket?.mock &&
+    !(globalThis as any).__ALLOW_REAL_WS_IN_TESTS__
+  ) {
+    return
+  }
+
   const wsUrl =
     getApiBaseUrl()
       .replace(/^http:/, "ws:")

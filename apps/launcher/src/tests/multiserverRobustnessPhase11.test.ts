@@ -992,23 +992,28 @@ describe("HiKAT Phase 11 Real Core Operations & Concurrency Suite (Items 1-14, 1
       removeEventListener: vi.fn(),
     }
 
-    ;(globalThis as any).WebSocket = vi.fn().mockImplementation(() => oldMockSocket)
-    const unsub1 = gameService.subscribeReleaseEvents(() => {})
+    const originalWebSocket = (globalThis as any).WebSocket
+    try {
+      ;(globalThis as any).WebSocket = vi.fn().mockImplementation(() => oldMockSocket)
+      const unsub1 = gameService.subscribeReleaseEvents(() => {})
 
-    ;(globalThis as any).WebSocket = vi.fn().mockImplementation(() => newMockSocket)
-    const unsub2 = gameService.subscribeReleaseEvents(() => {})
+      ;(globalThis as any).WebSocket = vi.fn().mockImplementation(() => newMockSocket)
+      const unsub2 = gameService.subscribeReleaseEvents(() => {})
 
-    if (oldSocketCloseHandler) {
-      oldSocketCloseHandler({ wasClean: false, code: 1006 })
+      if (oldSocketCloseHandler) {
+        oldSocketCloseHandler({ wasClean: false, code: 1006 })
+      }
+      if (oldSocketErrorHandler) {
+        oldSocketErrorHandler(new Error("Old socket error"))
+      }
+
+      expect(newMockSocket.close).not.toHaveBeenCalled()
+
+      unsub1()
+      unsub2()
+    } finally {
+      ;(globalThis as any).WebSocket = originalWebSocket
     }
-    if (oldSocketErrorHandler) {
-      oldSocketErrorHandler(new Error("Old socket error"))
-    }
-
-    expect(newMockSocket.close).not.toHaveBeenCalled()
-
-    unsub1()
-    unsub2()
   })
 
   // 20. gameService.resumeSync() no envía clientFiles ni versiones dummy

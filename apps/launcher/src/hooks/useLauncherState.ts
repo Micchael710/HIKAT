@@ -97,6 +97,14 @@ export function useLauncherState() {
     serversRef.current = servers
   }, [servers])
 
+  const isMountedRef = useRef(true)
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
   const triggerAutoUpdateIfNeeded = useCallback(
     async (
       serverId: string,
@@ -158,9 +166,15 @@ export function useLauncherState() {
     } catch (_) {}
   }, [])
 
+  const loadServersSeqRef = useRef(0)
+
   const loadServers = useCallback(async () => {
+    const currentSeq = ++loadServersSeqRef.current
     try {
       const fetchResult = await serverService.getLauncherServersResult()
+      if (!isMountedRef.current || currentSeq !== loadServersSeqRef.current) {
+        return serversRef.current
+      }
       if (!fetchResult.success) {
         return serversRef.current
       }
@@ -169,6 +183,10 @@ export function useLauncherState() {
       const prevKnown = getKnownServers(serversRef.current)
       const newIds = new Set(list.map((server) => server.id))
       const removedServers = prevKnown.filter((server) => !newIds.has(server.id))
+
+      if (!isMountedRef.current || currentSeq !== loadServersSeqRef.current) {
+        return serversRef.current
+      }
 
       if (removedServers.length > 0) {
         for (const removed of removedServers) {
@@ -235,6 +253,10 @@ export function useLauncherState() {
             ] as const
           }),
         )
+
+        if (!isMountedRef.current || currentSeq !== loadServersSeqRef.current) {
+          return serversRef.current
+        }
 
         setGameStates((prev) => {
           const next = { ...prev }

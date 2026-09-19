@@ -17,8 +17,9 @@ import {
   AuthErrorCode,
 } from "@hikat/shared"
 import { sanitizeUsername, sanitizeEmail, sanitizeInput } from "../utils/security"
+import { getAuthBaseUrl } from "../config/api"
 
-export const AUTH_URL = import.meta.env.VITE_AUTH_API_URL || "http://localhost:8788"
+export const AUTH_URL = getAuthBaseUrl()
 
 export interface UserProfile {
   id: string

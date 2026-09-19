@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import {
   getApiBaseUrl,
+  getAuthBaseUrl,
   resolveApiAssetUrl,
   DEFAULT_DEV_API_BASE_URL,
   DEFAULT_PROD_API_BASE_URL,
+  DEFAULT_DEV_AUTH_BASE_URL,
+  DEFAULT_PROD_AUTH_BASE_URL,
 } from "./api"
 
 describe("Launcher API Configuration & URL Resolution Authority", () => {
@@ -36,7 +39,7 @@ describe("Launcher API Configuration & URL Resolution Authority", () => {
     expect(base).toBe("http://192.168.1.100:8787")
   })
 
-  it("3. Packaged production build without override resolves to production API base", () => {
+  it("3. Packaged production build without override resolves to production API base (https://api.hikat.org)", () => {
     delete (import.meta.env as any).VITE_API_URL
     delete (import.meta.env as any).VITE_BACKEND_API_URL
     ;(import.meta.env as any).DEV = false
@@ -44,7 +47,34 @@ describe("Launcher API Configuration & URL Resolution Authority", () => {
 
     const base = getApiBaseUrl()
     expect(base).toBe(DEFAULT_PROD_API_BASE_URL)
-    expect(base).toBe("https://api.apparatia.net/api/v1")
+    expect(base).toBe("https://api.hikat.org")
+  })
+
+  it("3b. Renderer dev without override resolves to local development auth (http://localhost:8788)", () => {
+    delete (import.meta.env as any).VITE_AUTH_API_URL
+    ;(import.meta.env as any).DEV = true
+    ;(import.meta.env as any).MODE = "development"
+
+    const auth = getAuthBaseUrl()
+    expect(auth).toBe(DEFAULT_DEV_AUTH_BASE_URL)
+    expect(auth).toBe("http://localhost:8788")
+  })
+
+  it("3c. Renderer with explicit VITE_AUTH_API_URL override uses provided override", () => {
+    ;(import.meta.env as any).VITE_AUTH_API_URL = "https://custom-auth.example.com"
+
+    const auth = getAuthBaseUrl()
+    expect(auth).toBe("https://custom-auth.example.com")
+  })
+
+  it("3d. Packaged production build without override resolves to production Auth base (https://auth.hikat.org)", () => {
+    delete (import.meta.env as any).VITE_AUTH_API_URL
+    ;(import.meta.env as any).DEV = false
+    ;(import.meta.env as any).MODE = "production"
+
+    const auth = getAuthBaseUrl()
+    expect(auth).toBe(DEFAULT_PROD_AUTH_BASE_URL)
+    expect(auth).toBe("https://auth.hikat.org")
   })
 
   it("4. Relative asset URL is resolved against the authoritative backend base URL", () => {
