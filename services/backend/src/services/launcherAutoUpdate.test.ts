@@ -6,6 +6,7 @@ import {
   requestLauncherReleaseUploadTicket,
   completeLauncherReleaseUpload,
   publishLauncherRelease,
+  deleteLauncherRelease,
   getPublishedLauncherRelease,
   getLauncherReleases,
 } from "./launcherReleaseService"
@@ -192,6 +193,42 @@ describe("HiKAT Launcher Auto-Update & Release Management Suite", () => {
       expect(currentPublished?.id).toBe(r2.id)
       expect(currentPublished?.version).toBe("1.1.0")
     })
+
+    it("rejects publishing an older or equal version when a newer version is already published", async () => {
+      // 1. Publish 1.0.3
+      const ticket1 = await requestLauncherReleaseUploadTicket(db, env, {
+        version: "1.0.3",
+        filename: "HiKAT Launcher Setup 1.0.3.exe",
+        declaredSizeBytes: 100,
+        sha512: "sha512-release-1.0.3-with-more-than-32-chars",
+        adminUserId: adminId,
+      })
+      await mockR2.put(ticket1.objectKey, new Uint8Array(100))
+      const r1 = await completeLauncherReleaseUpload(db, env, {
+        uploadToken: ticket1.uploadToken,
+        adminUserId: adminId,
+      })
+      await publishLauncherRelease(db, r1.id)
+
+      // 2. Upload draft 1.0.2
+      const ticket2 = await requestLauncherReleaseUploadTicket(db, env, {
+        version: "1.0.2",
+        filename: "HiKAT Launcher Setup 1.0.2.exe",
+        declaredSizeBytes: 100,
+        sha512: "sha512-release-1.0.2-with-more-than-32-chars",
+        adminUserId: adminId,
+      })
+      await mockR2.put(ticket2.objectKey, new Uint8Array(100))
+      const r2 = await completeLauncherReleaseUpload(db, env, {
+        uploadToken: ticket2.uploadToken,
+        adminUserId: adminId,
+      })
+
+      // 3. Attempting to publish 1.0.2 must fail
+      await expect(publishLauncherRelease(db, r2.id)).rejects.toThrow(
+        "No se puede publicar la versión 1.0.2 porque no es superior a la versión actualmente activa (1.0.3)",
+      )
+    })
   })
 
   describe("4. HTTP Update Transport (electron-updater compatibility)", () => {
@@ -325,6 +362,94 @@ describe("HiKAT Launcher Auto-Update & Release Management Suite", () => {
       expect(res.status).toBe(206)
       expect(res.headers.get("Content-Range")).toBe("bytes 2-5/10")
       expect(res.headers.get("Content-Length")).toBe("4")
+    })
+  })
+
+  describe("5. Launcher Release Deletion", () => {
+    it("deletes a DRAFT release from both R2 storage and D1 database", async () => {
+      const ticket = await requestLauncherReleaseUploadTicket(db, env, {
+        version: "1.2.0-beta.1",
+        filename: "HiKAT Launcher Setup 1.2.0-beta.1.exe",
+        declaredSizeBytes: 150,
+        sha512: "sha512-release-beta-with-more-than-32-chars-long",
+        adminUserId: adminId,
+      })
+      await mockR2.put(ticket.objectKey, new Uint8Array(150))
+      const release = await completeLauncherReleaseUpload(db, env, {
+        uploadToken: ticket.uploadToken,
+        adminUserId: adminId,
+      })
+
+      expect(await mockR2.get(ticket.objectKey)).not.toBeNull()
+      const listBefore = await getLauncherReleases(db)
+      expect(listBefore.some((r) => r.id === release.id)).toBe(true)
+
+      const deleted = await deleteLauncherRelease(db, env, release.id)
+      expect(deleted).toBe(true)
+
+      // Verify removed from R2
+      expect(await mockR2.get(ticket.objectKey)).toBeNull()
+
+      // Verify removed from D1
+      const listAfter = await getLauncherReleases(db)
+      expect(listAfter.some((r) => r.id === release.id)).toBe(false)
+    })
+
+    it("rejects deleting a PUBLISHED release", async () => {
+      const ticket = await requestLauncherReleaseUploadTicket(db, env, {
+        version: "1.3.0",
+        filename: "HiKAT Launcher Setup 1.3.0.exe",
+        declaredSizeBytes: 200,
+        sha512: "sha512-release-1.3.0-with-more-than-32-chars",
+        adminUserId: adminId,
+      })
+      await mockR2.put(ticket.objectKey, new Uint8Array(200))
+      const release = await completeLauncherReleaseUpload(db, env, {
+        uploadToken: ticket.uploadToken,
+        adminUserId: adminId,
+      })
+      await publishLauncherRelease(db, release.id)
+
+      await expect(deleteLauncherRelease(db, env, release.id)).rejects.toThrow(
+        "No se puede eliminar la versión actualmente publicada",
+      )
+    })
+
+    it("rejects deleting an ARCHIVED release", async () => {
+      // 1. Publish 1.4.0
+      const ticket1 = await requestLauncherReleaseUploadTicket(db, env, {
+        version: "1.4.0",
+        filename: "HiKAT Launcher Setup 1.4.0.exe",
+        declaredSizeBytes: 100,
+        sha512: "sha512-release-1.4.0-with-more-than-32-chars",
+        adminUserId: adminId,
+      })
+      await mockR2.put(ticket1.objectKey, new Uint8Array(100))
+      const r1 = await completeLauncherReleaseUpload(db, env, {
+        uploadToken: ticket1.uploadToken,
+        adminUserId: adminId,
+      })
+      await publishLauncherRelease(db, r1.id)
+
+      // 2. Publish 1.5.0, which archives 1.4.0
+      const ticket2 = await requestLauncherReleaseUploadTicket(db, env, {
+        version: "1.5.0",
+        filename: "HiKAT Launcher Setup 1.5.0.exe",
+        declaredSizeBytes: 100,
+        sha512: "sha512-release-1.5.0-with-more-than-32-chars",
+        adminUserId: adminId,
+      })
+      await mockR2.put(ticket2.objectKey, new Uint8Array(100))
+      const r2 = await completeLauncherReleaseUpload(db, env, {
+        uploadToken: ticket2.uploadToken,
+        adminUserId: adminId,
+      })
+      await publishLauncherRelease(db, r2.id)
+
+      // Now r1 is ARCHIVED
+      await expect(deleteLauncherRelease(db, env, r1.id)).rejects.toThrow(
+        "Solo se pueden eliminar versiones en estado borrador (DRAFT)",
+      )
     })
   })
 })

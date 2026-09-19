@@ -75,5 +75,10 @@ export const launcherTypeDefs = /* GraphQL */ `
     Publish a launcher release, automatically archiving any previously published release (Admin only)
     """
     publishLauncherRelease(id: ID!): LauncherRelease!
+
+    """
+    Delete an unpublished (DRAFT) launcher release, removing its R2 installer binary and database record (Admin only)
+    """
+    deleteLauncherRelease(id: ID!): Boolean!
   }
 `

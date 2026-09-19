@@ -3348,6 +3348,16 @@ export const launcherApi = {
     const data = await executeGraphQL<{ publishLauncherRelease: import("../types").LauncherReleaseItem }>(mutation, { id })
     return data.publishLauncherRelease
   },
+
+  async deleteLauncherRelease(id: string): Promise<boolean> {
+    const mutation = /* GraphQL */ `
+      mutation DeleteLauncherRelease($id: ID!) {
+        deleteLauncherRelease(id: $id)
+      }
+    `
+    const data = await executeGraphQL<{ deleteLauncherRelease: boolean }>(mutation, { id })
+    return data.deleteLauncherRelease
+  },
 }
 
 export const graphqlClient = {

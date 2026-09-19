@@ -114,6 +114,7 @@ import {
   requestLauncherReleaseUploadTicket,
   completeLauncherReleaseUpload,
   publishLauncherRelease,
+  deleteLauncherRelease,
   getLauncherReleases,
   getPublishedLauncherRelease,
 } from "../services/launcherReleaseService"
@@ -2293,6 +2294,18 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return publishLauncherRelease(context.db, args.id)
+    },
+
+    deleteLauncherRelease: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<boolean> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return deleteLauncherRelease(context.db, context.env, args.id)
     },
   },
 }

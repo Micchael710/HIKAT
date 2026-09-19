@@ -270,6 +270,33 @@ export async function completeLauncherReleaseUpload(
   }
 }
 
+export function compareVersions(v1: string, v2: string): number {
+  const clean1 = v1.replace(/^v/i, "").trim()
+  const clean2 = v2.replace(/^v/i, "").trim()
+
+  const [main1, pre1] = clean1.split("-")
+  const [main2, pre2] = clean2.split("-")
+
+  const parts1 = (main1 || "").split(".").map((p) => parseInt(p, 10) || 0)
+  const parts2 = (main2 || "").split(".").map((p) => parseInt(p, 10) || 0)
+
+  const maxLen = Math.max(parts1.length, parts2.length)
+  for (let i = 0; i < maxLen; i++) {
+    const num1 = parts1[i] ?? 0
+    const num2 = parts2[i] ?? 0
+    if (num1 > num2) return 1
+    if (num1 < num2) return -1
+  }
+
+  if (!pre1 && pre2) return 1
+  if (pre1 && !pre2) return -1
+  if (pre1 && pre2) {
+    return pre1.localeCompare(pre2, undefined, { numeric: true })
+  }
+
+  return 0
+}
+
 export async function publishLauncherRelease(
   db: Database,
   id: string,
@@ -293,6 +320,25 @@ export async function publishLauncherRelease(
       "La release del Launcher no existe.",
       "NOT_FOUND",
     )
+  }
+
+  // Enforce semver progression: cannot publish a version lower than or equal to the currently published version
+  const currentPublished = await db
+    .select()
+    .from(launcherReleases)
+    .where(eq(launcherReleases.status, "PUBLISHED"))
+    .limit(1)
+
+  if (currentPublished.length > 0 && currentPublished[0]) {
+    const pub = currentPublished[0]
+    if (pub.id !== release.id) {
+      if (compareVersions(release.version, pub.version) <= 0) {
+        throw createGraphQLError(
+          `No se puede publicar la versión ${release.version} porque no es superior a la versión actualmente activa (${pub.version}).`,
+          "VALIDATION_ERROR",
+        )
+      }
+    }
   }
 
   const now = new Date().toISOString()
@@ -323,6 +369,58 @@ export async function publishLauncherRelease(
     createdAt: release.createdAt,
     publishedAt: now,
   }
+}
+
+export async function deleteLauncherRelease(
+  db: Database,
+  env: Env,
+  id: string,
+): Promise<boolean> {
+  const target = await db
+    .select()
+    .from(launcherReleases)
+    .where(eq(launcherReleases.id, id))
+    .limit(1)
+
+  if (target.length === 0 || !target[0]) {
+    throw createGraphQLError(
+      "La release del Launcher no existe.",
+      "NOT_FOUND",
+    )
+  }
+
+  const release = target[0]
+
+  if (release.status === "PUBLISHED") {
+    throw createGraphQLError(
+      "No se puede eliminar la versión actualmente publicada.",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  if (release.status !== "DRAFT") {
+    throw createGraphQLError(
+      "Solo se pueden eliminar versiones en estado borrador (DRAFT).",
+      "VALIDATION_ERROR",
+    )
+  }
+
+  // 1. Delete installer binary from R2
+  const objectKey = release.objectKey || `launcher/releases/${release.version}/${release.filename}`
+  if (env.ASSETS) {
+    try {
+      await env.ASSETS.delete(objectKey)
+    } catch (r2Err) {
+      console.warn(`[LauncherRelease] Error deleting R2 object ${objectKey}:`, r2Err)
+    }
+  }
+
+  // 2. Delete database record from D1
+  await db
+    .delete(launcherReleases)
+    .where(eq(launcherReleases.id, id))
+
+  return true
 }
 
 export async function getLauncherReleases(

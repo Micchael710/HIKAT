@@ -9,6 +9,7 @@ import {
   IconDownload,
   IconSpinner,
   IconCheck,
+  IconTrash,
 } from "../../theme/icons"
 import LiveToast from "../common/LiveToast"
 
@@ -40,6 +41,26 @@ function formatDate(isoDate?: string | null): string {
   }
 }
 
+function compareVersions(v1: string, v2: string): number {
+  const clean1 = v1.replace(/^v/i, "").trim()
+  const clean2 = v2.replace(/^v/i, "").trim()
+  const [main1, pre1] = clean1.split("-")
+  const [main2, pre2] = clean2.split("-")
+  const parts1 = (main1 || "").split(".").map((p) => parseInt(p, 10) || 0)
+  const parts2 = (main2 || "").split(".").map((p) => parseInt(p, 10) || 0)
+  const maxLen = Math.max(parts1.length, parts2.length)
+  for (let i = 0; i < maxLen; i++) {
+    const num1 = parts1[i] ?? 0
+    const num2 = parts2[i] ?? 0
+    if (num1 > num2) return 1
+    if (num1 < num2) return -1
+  }
+  if (!pre1 && pre2) return 1
+  if (pre1 && !pre2) return -1
+  if (pre1 && pre2) return pre1.localeCompare(pre2, undefined, { numeric: true })
+  return 0
+}
+
 export default function LauncherReleasesView({ theme }: LauncherReleasesViewProps) {
   const isDark = theme === "dark"
   const tokens = getThemeTokens(theme)
@@ -62,6 +83,10 @@ export default function LauncherReleasesView({ theme }: LauncherReleasesViewProp
   // Publish confirmation modal state
   const [publishTarget, setPublishTarget] = useState<LauncherReleaseItem | null>(null)
   const [isPublishing, setIsPublishing] = useState<boolean>(false)
+
+  // Delete confirmation modal state
+  const [deleteTarget, setDeleteTarget] = useState<LauncherReleaseItem | null>(null)
+  const [isDeleting, setIsDeleting] = useState<boolean>(false)
 
   // Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null)
@@ -104,6 +129,13 @@ export default function LauncherReleasesView({ theme }: LauncherReleasesViewProp
     const cleanVer = versionInput.trim()
     if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(cleanVer)) {
       setUploadError("El formato de versión debe seguir SemVer (ej: 1.0.1 o 1.0.1-beta.1).")
+      return
+    }
+
+    if (publishImmediately && publishedRelease && compareVersions(cleanVer, publishedRelease.version) <= 0) {
+      setUploadError(
+        `No se puede publicar la versión ${cleanVer} porque ya existe una versión publicada mayor o igual (v${publishedRelease.version}). Desmarca "Publicar inmediatamente" para guardarla como borrador.`
+      )
       return
     }
 
@@ -157,6 +189,21 @@ export default function LauncherReleasesView({ theme }: LauncherReleasesViewProp
       setToastMessage(err.message || "Error al publicar la versión.")
     } finally {
       setIsPublishing(false)
+    }
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return
+    setIsDeleting(true)
+    try {
+      await graphqlClient.deleteLauncherRelease(deleteTarget.id)
+      setToastMessage(`Release v${deleteTarget.version} eliminada correctamente.`)
+      setDeleteTarget(null)
+      await loadData()
+    } catch (err: any) {
+      setToastMessage(err.message || "Error al eliminar la release.")
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -484,6 +531,10 @@ export default function LauncherReleasesView({ theme }: LauncherReleasesViewProp
                     {releases.map((rel) => {
                       const isPub = rel.status === "PUBLISHED"
                       const isArchived = rel.status === "ARCHIVED"
+                      const isDraft = rel.status === "DRAFT"
+                      const canPublish =
+                        !isPub &&
+                        (!publishedRelease || compareVersions(rel.version, publishedRelease.version) > 0)
                       return (
                         <tr
                           key={rel.id}
@@ -534,8 +585,8 @@ export default function LauncherReleasesView({ theme }: LauncherReleasesViewProp
                             {formatDate(rel.createdAt)}
                           </td>
                           <td style={{ padding: "16px 20px", textAlign: "right" }}>
-                            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                              {!isPub && (
+                            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
+                              {canPublish && (
                                 <button
                                   onClick={() => setPublishTarget(rel)}
                                   style={{
@@ -550,6 +601,27 @@ export default function LauncherReleasesView({ theme }: LauncherReleasesViewProp
                                   }}
                                 >
                                   Publicar
+                                </button>
+                              )}
+                              {isDraft && (
+                                <button
+                                  onClick={() => setDeleteTarget(rel)}
+                                  style={{
+                                    padding: "6px 12px",
+                                    borderRadius: 6,
+                                    background: isDark ? "rgba(239, 68, 68, 0.12)" : "#fee2e2",
+                                    color: "#ef4444",
+                                    border: "1px solid rgba(239, 68, 68, 0.3)",
+                                    fontSize: 12,
+                                    fontWeight: 600,
+                                    cursor: "pointer",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                  }}
+                                >
+                                  <IconTrash size={13} />
+                                  Eliminar
                                 </button>
                               )}
                               {(isPub || isArchived) && (
@@ -910,6 +982,94 @@ export default function LauncherReleasesView({ theme }: LauncherReleasesViewProp
                   <>
                     <IconCheck size={16} />
                     Confirmar y Publicar
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteTarget && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0, 0, 0, 0.7)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 480,
+              background: tokens.bgCard,
+              borderRadius: 16,
+              border: `1px solid ${tokens.borderMedium}`,
+              padding: 28,
+              boxShadow: tokens.cardShadowLg,
+            }}
+          >
+            <h3 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 10px 0", color: "#ef4444" }}>
+              ¿Eliminar release v{deleteTarget.version}?
+            </h3>
+            <p style={{ fontSize: 14, color: tokens.textSecondary, lineHeight: 1.5, margin: "0 0 20px 0" }}>
+              Se eliminará de forma permanente el instalador ejecutable <strong>{deleteTarget.filename}</strong> de Cloudflare R2 y su registro en la base de datos. Esta acción no se puede deshacer.
+            </p>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setDeleteTarget(null)}
+                style={{
+                  padding: "10px 18px",
+                  borderRadius: 8,
+                  background: "none",
+                  border: `1px solid ${tokens.borderMedium}`,
+                  color: tokens.textPrimary,
+                  fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleConfirmDelete}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: 8,
+                  background: "#ef4444",
+                  color: "#ffffff",
+                  border: "none",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                {isDeleting ? (
+                  <>
+                    <IconSpinner size={16} className="spin" />
+                    Eliminando...
+                  </>
+                ) : (
+                  <>
+                    <IconTrash size={16} />
+                    Eliminar Release
                   </>
                 )}
               </button>
