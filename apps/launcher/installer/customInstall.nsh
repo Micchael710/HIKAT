@@ -28,6 +28,11 @@ Var /GLOBAL TxtLocation
 Var /GLOBAL BtnBrowse
 Var /GLOBAL TitleFont
 
+Var /GLOBAL UnDialog
+Var /GLOBAL UnTitleFont
+Var /GLOBAL ChkDeleteData
+Var /GLOBAL DeleteDataSelected
+
 !macro customWelcomePage
   Function DeriveHiKatRoot
     # Argument on stack: path chosen by user or initial directory
@@ -268,3 +273,101 @@ Var /GLOBAL TitleFont
     ${EndIf}
   ${EndIf}
 !macroend
+
+!macro customUnInit
+  StrCpy $DeleteDataSelected "0"
+!macroend
+
+!macro customUnWelcomePage
+  Function un.HiKatUninstallPageCreate
+    # Create nsDialogs canvas
+    nsDialogs::Create 1018
+    Pop $UnDialog
+    ${If} $UnDialog == error
+      Abort
+    ${EndIf}
+
+    # Clean white background
+    SetCtlColors $UnDialog 0x000000 0xFFFFFF
+
+    # Configure Wizard Buttons: Next -> Desinstalar, Hide Back
+    GetDlgItem $0 $HWNDPARENT 1
+    SendMessage $0 ${WM_SETTEXT} 0 "STR:Desinstalar"
+
+    GetDlgItem $0 $HWNDPARENT 3
+    ShowWindow $0 ${SW_HIDE}
+
+    # Title: Desinstalar HiKAT Launcher
+    ${NSD_CreateLabel} 15u 18u 270u 16u "Desinstalar HiKAT Launcher"
+    Pop $0
+    SetCtlColors $0 0x111827 0xFFFFFF
+    CreateFont $UnTitleFont "Segoe UI" 12 700
+    SendMessage $0 ${WM_SETFONT} $UnTitleFont 1
+
+    # Subtitle / prompt text
+    ${NSD_CreateLabel} 15u 42u 270u 24u "Se desinstalará HiKAT Launcher de tu equipo.$\r$\nLos juegos descargados se conservarán para futuras instalaciones salvo que marques la casilla inferior."
+    Pop $0
+    SetCtlColors $0 0x374151 0xFFFFFF
+
+    # Checkbox: Eliminar también los juegos descargados y los datos de HiKAT
+    # Unchecked by default
+    ${NSD_CreateCheckbox} 15u 72u 270u 14u "Eliminar también los juegos descargados y los datos de HiKAT"
+    Pop $ChkDeleteData
+    SetCtlColors $ChkDeleteData 0x111827 0xFFFFFF
+    ${NSD_SetState} $ChkDeleteData ${BST_UNCHECKED}
+
+    nsDialogs::Show
+  FunctionEnd
+
+  Function un.HiKatUninstallPageLeave
+    ${NSD_GetState} $ChkDeleteData $DeleteDataSelected
+  FunctionEnd
+
+  UninstPage custom un.HiKatUninstallPageCreate un.HiKatUninstallPageLeave
+!macroend
+
+!macro customUnInstall
+  ${If} $DeleteDataSelected == "1"
+    # Derive HiKAT Root from $INSTDIR (<HiKatRoot>\Launcher)
+    ${GetParent} "$INSTDIR" $0
+    ${GetFileName} "$0" $R1
+    ${GetFileName} "$INSTDIR" $R2
+
+    # Robust Safety Validation:
+    # 1. $0 must not be empty
+    # 2. $0 must end with "HiKAT" (the folder must strictly be named HiKAT)
+    # 3. $INSTDIR must end with "Launcher"
+    # 4. $0 must not be a drive root or system folder
+    ${If} $0 != ""
+    ${AndIf} $R1 == "HiKAT"
+    ${AndIf} $R2 == "Launcher"
+    ${AndIf} $0 != "$PROGRAMFILES"
+    ${AndIf} $0 != "$PROGRAMFILES64"
+    ${AndIf} $0 != "$WINDIR"
+    ${AndIf} $0 != "C:\"
+    ${AndIf} $0 != "D:\"
+    ${AndIf} $0 != "E:\"
+      # Delete downloaded games
+      RMDir /r "$0\games"
+
+      # Delete shared runtime
+      RMDir /r "$0\runtime"
+
+      # Clean any additional temporary files inside HiKAT root
+      Delete "$0\*.*"
+
+      # Clean user data inside AppData
+      SetShellVarContext current
+      RMDir /r "$APPDATA\HiKAT"
+      RMDir /r "$APPDATA\hikat-launcher"
+      RMDir /r "$LOCALAPPDATA\HiKAT"
+      RMDir /r "$LOCALAPPDATA\hikat-launcher"
+      SetShellVarContext all
+      RMDir /r "$APPDATA\HiKAT"
+
+      # Remove the main HiKAT folder once no content remains
+      RMDir "$0"
+    ${EndIf}
+  ${EndIf}
+!macroend
+

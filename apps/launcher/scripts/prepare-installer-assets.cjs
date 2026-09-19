@@ -25,11 +25,9 @@ if (fs.existsSync(logoBlackPath)) {
   const targetW = 150
   const targetH = 57
 
-  const padX = 4
-  const padY = 2
-  const availW = targetW - padX * 2
-  const availH = targetH - padY * 2
-  const scale = Math.min(availW / src.width, availH / src.height)
+  const reduction = 0.80 // ~20% smaller than previous full-bleed, leaving clean margins
+  const baseScale = Math.min((targetW - 8) / src.width, (targetH - 4) / src.height)
+  const scale = baseScale * reduction
   const drawW = Math.round(src.width * scale)
   const drawH = Math.round(src.height * scale)
   const offsetX = Math.floor((targetW - drawW) / 2)
