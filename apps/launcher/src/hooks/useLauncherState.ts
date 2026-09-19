@@ -66,7 +66,14 @@ export function useLauncherState() {
     return ""
   })
 
-  const [view, setView] = useState<LauncherView>("home")
+  const [view, setViewInternal] = useState<LauncherView>("home")
+  const viewRef = useRef<LauncherView>(view)
+  useEffect(() => {
+    viewRef.current = view
+  }, [view])
+
+  const [serverCatalogResolved, setServerCatalogResolved] = useState<boolean>(false)
+  const serverCatalogResolvedRef = useRef<boolean>(false)
 
   /* Theme state with localStorage persistence */
   const [theme, setTheme] = useState<ThemeMode>(() => {
@@ -96,6 +103,14 @@ export function useLauncherState() {
   useEffect(() => {
     serversRef.current = servers
   }, [servers])
+
+  const navigateToView = useCallback((targetView: LauncherView) => {
+    if (targetView === "home" && serverCatalogResolvedRef.current && serversRef.current.length === 0) {
+      setViewInternal("skins")
+    } else {
+      setViewInternal(targetView)
+    }
+  }, [])
 
   const isMountedRef = useRef(true)
   useEffect(() => {
@@ -178,6 +193,9 @@ export function useLauncherState() {
       if (!fetchResult.success) {
         return serversRef.current
       }
+
+      serverCatalogResolvedRef.current = true
+      setServerCatalogResolved(true)
 
       const list = fetchResult.servers
       const prevKnown = getKnownServers(serversRef.current)
@@ -322,6 +340,10 @@ export function useLauncherState() {
         try {
           localStorage.removeItem("hikat_selected_game_id")
         } catch (_) {}
+
+        if (viewRef.current === "home") {
+          setViewInternal("skins")
+        }
       }
       return list
     } catch (_) {
@@ -734,6 +756,7 @@ export function useLauncherState() {
         if (hasValidDisplayName) {
           if (!pendingAuthActionRef.current) {
             setScreen("home")
+            navigateToView("home")
           }
           setUsername(session.user.displayName!.trim())
         } else {
@@ -1165,8 +1188,8 @@ export function useLauncherState() {
   const handleLogin = useCallback((name: string) => {
     setUsername(name)
     setScreen("home")
-    setView("home")
-  }, [])
+    navigateToView("home")
+  }, [navigateToView])
 
   /**
    * Handle user logout cleanly
@@ -1179,12 +1202,12 @@ export function useLauncherState() {
     cosmeticsLoadedRef.current = false
     setUsername("")
     setScreen("login")
-    setView("home")
+    navigateToView("home")
     if (appliedSkin === "player-custom") {
       setAppliedSkin("none")
     }
     setAppliedCape("none")
-  }, [appliedSkin])
+  }, [appliedSkin, navigateToView])
 
   return {
     screen,
@@ -1194,7 +1217,9 @@ export function useLauncherState() {
     username,
     setUsername,
     view,
-    setView,
+    setView: navigateToView,
+    navigateToView,
+    serverCatalogResolved,
     theme,
     setTheme,
     appliedSkin,

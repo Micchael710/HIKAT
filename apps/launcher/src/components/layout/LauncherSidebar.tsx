@@ -9,6 +9,7 @@ import { resolveApiAssetUrl } from "../../config/api"
 interface LauncherSidebarProps {
   view: LauncherView
   setView: (view: LauncherView) => void
+  navigateToView?: (view: LauncherView) => void
   s: number
   theme: ThemeMode
   activeSkinAccent: { r: number; g: number; b: number; css: string }
@@ -22,6 +23,7 @@ interface LauncherSidebarProps {
 export default function LauncherSidebar({
   view,
   setView,
+  navigateToView,
   s,
   theme,
   activeSkinAccent,
@@ -59,7 +61,7 @@ export default function LauncherSidebar({
           animation:
             "topLogoSlideDown 0.48s cubic-bezier(0.16, 1, 0.3, 1) 0.28s both",
         }}
-        onClick={() => setView("home")}
+        onClick={() => (navigateToView ? navigateToView("home") : setView("home"))}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = "scale(1.06)"
         }}

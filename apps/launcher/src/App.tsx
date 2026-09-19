@@ -22,6 +22,7 @@ export default function App() {
     username,
     view,
     setView,
+    navigateToView,
     theme,
     setTheme,
     appliedSkin,
@@ -278,7 +279,7 @@ export default function App() {
               <ProfileView
                 username={username}
                 activeSkinData={activeSkinData}
-                onBack={() => setView("home")}
+                onBack={() => navigateToView("home")}
                 onLogout={handleLogout}
                 theme={theme}
               />
@@ -328,6 +329,7 @@ export default function App() {
           <LauncherSidebar
             view={view}
             setView={setView}
+            navigateToView={navigateToView}
             s={scale}
             theme={theme}
             activeSkinAccent={activeSkinAccent}

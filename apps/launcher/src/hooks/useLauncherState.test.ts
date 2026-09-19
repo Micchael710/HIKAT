@@ -1407,6 +1407,151 @@ describe("useLauncherState Hook (Phase 07 Hardening & Shard 8F Section Refresh)"
       uninstallSpy.mockRestore()
     })
   })
+
+  describe("Centralized View Navigation & Empty Catalog Default to Skins", () => {
+    it("1. catálogo exitoso vacío + intento de Home -> Skins", async () => {
+      vi.spyOn(serverService, "getLauncherServersResult").mockResolvedValue({
+        success: true,
+        servers: [],
+      })
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(result.current.serverCatalogResolved).toBe(true)
+      expect(result.current.servers).toHaveLength(0)
+      expect(result.current.view).toBe("skins")
+
+      await act(async () => {
+        result.current.navigateToView("home")
+      })
+      expect(result.current.view).toBe("skins")
+
+      unmount()
+    })
+
+    it("2. catálogo exitoso con servidores + intento de Home -> Home", async () => {
+      const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+      vi.spyOn(serverService, "getLauncherServersResult").mockResolvedValue({
+        success: true,
+        servers: [serverA] as any,
+      })
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(result.current.serverCatalogResolved).toBe(true)
+      expect(result.current.servers).toHaveLength(1)
+      expect(result.current.view).toBe("home")
+
+      await act(async () => {
+        result.current.navigateToView("settings")
+      })
+      expect(result.current.view).toBe("settings")
+
+      await act(async () => {
+        result.current.navigateToView("home")
+      })
+      expect(result.current.view).toBe("home")
+
+      unmount()
+    })
+
+    it("3. error de catálogo -> no asumir catálogo vacío", async () => {
+      vi.spyOn(serverService, "getLauncherServersResult").mockResolvedValue({
+        success: false,
+        servers: [],
+        error: "Network error",
+      })
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(result.current.serverCatalogResolved).toBe(false)
+      expect(result.current.view).toBe("home")
+
+      await act(async () => {
+        result.current.navigateToView("settings")
+      })
+      expect(result.current.view).toBe("settings")
+
+      await act(async () => {
+        result.current.navigateToView("home")
+      })
+      expect(result.current.view).toBe("home")
+
+      unmount()
+    })
+
+    it("4. catálogo pasa de servidores a vacío mientras estás en Home -> Skins", async () => {
+      const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+      let currentResult: any = {
+        success: true,
+        servers: [serverA],
+      }
+      vi.spyOn(serverService, "getLauncherServersResult").mockImplementation(async () => currentResult)
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(result.current.servers).toHaveLength(1)
+      expect(result.current.view).toBe("home")
+
+      currentResult = {
+        success: true,
+        servers: [],
+      }
+
+      await act(async () => {
+        await result.current.refreshServers()
+      })
+
+      expect(result.current.servers).toHaveLength(0)
+      expect(result.current.serverCatalogResolved).toBe(true)
+      expect(result.current.view).toBe("skins")
+
+      unmount()
+    })
+
+    it("5. catálogo pasa de vacío a tener servidores mientras estás en Skins -> permanecer en Skins", async () => {
+      let currentResult: any = {
+        success: true,
+        servers: [],
+      }
+      vi.spyOn(serverService, "getLauncherServersResult").mockImplementation(async () => currentResult)
+
+      const { result, unmount } = renderCustomHook(() => useLauncherState())
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      expect(result.current.servers).toHaveLength(0)
+      expect(result.current.view).toBe("skins")
+
+      const serverA = { id: "srv-a", name: "Alpha", activeRelease: { version: "1.0.0", minecraftVersion: "1.20.1", modLoader: "NEOFORGE" } }
+      currentResult = {
+        success: true,
+        servers: [serverA],
+      }
+
+      await act(async () => {
+        await result.current.refreshServers()
+      })
+
+      expect(result.current.servers).toHaveLength(1)
+      expect(result.current.view).toBe("skins")
+
+      unmount()
+    })
+  })
 })
 
 
