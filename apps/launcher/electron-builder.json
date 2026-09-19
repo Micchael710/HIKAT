@@ -2,6 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.hikat.launcher",
   "productName": "HiKAT Launcher",
+  "copyright": "Copyright © 2026 HiKAT Team",
   "electronDist": "node_modules/electron/dist",
   "directories": {
     "output": "dist-installer"
@@ -12,6 +13,8 @@
     "package.json"
   ],
   "win": {
+    "icon": "installer/resources/icon.png",
+    "executableName": "HiKAT Launcher",
     "target": [
       {
         "target": "nsis",
@@ -25,7 +28,10 @@
     "allowElevation": true,
     "differentialPackage": false,
     "deleteAppDataOnUninstall": false,
-    "installerIcon": "installer/resources/icon.ico",
+    "shortcutName": "HiKAT Launcher",
+    "uninstallDisplayName": "HiKAT Launcher",
+    "createStartMenuShortcut": true,
+    "artifactName": "HiKAT Launcher Setup ${version}.${ext}",
     "installerHeader": "installer/resources/installerHeader.bmp",
     "installerSidebar": "installer/resources/installerSidebar.bmp",
     "uninstallerSidebar": "installer/resources/installerSidebar.bmp",
@@ -33,3 +39,4 @@
     "include": "installer/customInstall.nsh"
   }
 }
+

@@ -206,24 +206,51 @@ if (fs.existsSync(hikatLogoPath)) {
   console.log("Generated installerSidebar.bmp (" + targetW + "x" + targetH + ")")
 }
 
-// 3. Generate icon.ico from logo-windows.png
+// 3. Generate icon.png (512x512) from logo-windows.png for electron-builder canonical Windows icon
 const logoWindowsPath = path.join(BRANDING_DIR, "logo-windows.png")
 if (fs.existsSync(logoWindowsPath)) {
-  const pngBuf = fs.readFileSync(logoWindowsPath)
-  const icoHeader = Buffer.alloc(22)
-  icoHeader.writeUInt16LE(0, 0) // reserved
-  icoHeader.writeUInt16LE(1, 2) // icon type
-  icoHeader.writeUInt16LE(1, 4) // 1 image
-  icoHeader.writeUInt8(180, 6)  // width
-  icoHeader.writeUInt8(180, 7)  // height
-  icoHeader.writeUInt8(0, 8)    // colors
-  icoHeader.writeUInt8(0, 9)    // reserved
-  icoHeader.writeUInt16LE(1, 10) // planes
-  icoHeader.writeUInt16LE(32, 12) // bpp
-  icoHeader.writeUInt32LE(pngBuf.length, 14) // data size
-  icoHeader.writeUInt32LE(22, 18) // offset
+  const src = decode(fs.readFileSync(logoWindowsPath))
+  const targetW = 512
+  const targetH = 512
+  const dstData = Buffer.alloc(targetW * targetH * 4)
 
-  const icoBuf = Buffer.concat([icoHeader, pngBuf])
-  fs.writeFileSync(path.join(OUT_DIR, "icon.ico"), icoBuf)
-  console.log("Generated icon.ico from logo-windows.png")
+  for (let y = 0; y < targetH; y++) {
+    for (let x = 0; x < targetW; x++) {
+      const gx = (x / (targetW - 1)) * (src.width - 1)
+      const gy = (y / (targetH - 1)) * (src.height - 1)
+      const gxi = Math.floor(gx)
+      const gyi = Math.floor(gy)
+      const c00 = (gyi * src.width + gxi) * 4
+      const c10 = (gyi * src.width + Math.min(gxi + 1, src.width - 1)) * 4
+      const c01 = (Math.min(gyi + 1, src.height - 1) * src.width + gxi) * 4
+      const c11 = (Math.min(gyi + 1, src.height - 1) * src.width + Math.min(gxi + 1, src.width - 1)) * 4
+
+      const fx = gx - gxi
+      const fy = gy - gyi
+
+      function interp(offset) {
+        const top = src.data[c00 + offset] * (1 - fx) + src.data[c10 + offset] * fx
+        const bottom = src.data[c01 + offset] * (1 - fx) + src.data[c11 + offset] * fx
+        return top * (1 - fy) + bottom * fy
+      }
+
+      const idx = (y * targetW + x) * 4
+      dstData[idx] = Math.round(interp(0))
+      dstData[idx + 1] = Math.round(interp(1))
+      dstData[idx + 2] = Math.round(interp(2))
+      dstData[idx + 3] = Math.round(interp(3))
+    }
+  }
+
+  const { encode } = require("fast-png")
+  const outPng = encode({ width: targetW, height: targetH, data: dstData })
+  fs.writeFileSync(path.join(OUT_DIR, "icon.png"), outPng)
+  console.log("Generated icon.png (" + targetW + "x" + targetH + ") from logo-windows.png")
+
+  // Remove obsolete manual 180x180 icon.ico if present
+  const obsoleteIco = path.join(OUT_DIR, "icon.ico")
+  if (fs.existsSync(obsoleteIco)) {
+    fs.unlinkSync(obsoleteIco)
+  }
 }
+

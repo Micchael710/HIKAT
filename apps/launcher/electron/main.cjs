@@ -35,6 +35,11 @@ try {
   app.setPath("userData", getUserDataRoot())
 } catch (_) { }
 
+// Set consistent Windows Application User Model ID for shell grouping, shortcuts, and notifications
+try {
+  app.setAppUserModelId("com.hikat.launcher")
+} catch (_) { }
+
 // Protocol client registration for OAuth deep linking (hikat://auth/callback)
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
@@ -3266,6 +3271,10 @@ ipcMain.handle("game-get-runtime-info", async (_event, payload = {}) => {
 })
 
 app.whenReady().then(() => {
+  try {
+    app.setAppUserModelId("com.hikat.launcher")
+  } catch (_) { }
+
   startOAuthLoopbackServer()
   setupInstanceWatcher()
   void processPendingGameRemovals()
