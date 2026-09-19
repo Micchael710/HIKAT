@@ -85,6 +85,29 @@ describe("HiKAT Launcher - Production Hardening Suite", () => {
       expect(PROD_CSP).toContain("http://127.0.0.1:47821")
     })
 
+    it("production CSP connect-src does NOT contain generic https: and strictly contains HiKAT endpoints + OAuth loopback", () => {
+      const connectSrcMatch = PROD_CSP.match(/connect-src\s+([^;]+);/)
+      expect(connectSrcMatch).toBeTruthy()
+      const connectSrc = connectSrcMatch![1]
+      const tokens = connectSrc.split(/\s+/).filter(Boolean)
+
+      // Must NOT contain generic https:
+      expect(tokens).not.toContain("https:")
+
+      // Must strictly contain expected origins
+      expect(tokens).toEqual([
+        "'self'",
+        "https://api.hikat.org",
+        "wss://api.hikat.org",
+        "https://auth.hikat.org",
+        "http://127.0.0.1:47821",
+      ])
+
+      // img-src and media-src retain https: for external assets
+      expect(PROD_CSP).toMatch(/img-src[^;]*\bhttps:/)
+      expect(PROD_CSP).toMatch(/media-src[^;]*\bhttps:/)
+    })
+
     it("development CSP allows localhost and local network servers", () => {
       expect(DEV_CSP).toContain("http://localhost:*")
       expect(DEV_CSP).toContain("http://127.0.0.1:*")
