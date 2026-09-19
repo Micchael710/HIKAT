@@ -9,27 +9,39 @@
  * - Bypasses directory/permission operations during auto-updates (${isUpdated})
  */
 
-!macro customHeader
-  !define MUI_PAGE_CUSTOMFUNCTION_LEAVE DirectoryLeave
-!macroend
+Function HiKatInstFilesPre
+  # Normalization & path derivation prior to files extraction
+  StrCpy $R9 "$INSTDIR" 1 -1
+  ${If} $R9 == "\"
+    StrLen $R8 "$INSTDIR"
+    ${If} $R8 > 3
+      StrCpy $INSTDIR "$INSTDIR" -1
+    ${EndIf}
+  ${EndIf}
 
-Function DirectoryLeave
-  # Ensure the target installation directory is always formatted as <PARENT>\HiKAT\Launcher
   ${GetFileName} "$INSTDIR" $R0
   ${GetParent} "$INSTDIR" $R1
   ${GetFileName} "$R1" $R2
 
   ${If} $R0 == "Launcher"
   ${AndIf} $R2 == "HiKAT"
-    # User already has canonical ...\HiKAT\Launcher path
+    # Already canonical ...\HiKAT\Launcher
   ${ElseIf} $R0 == "HiKAT"
-    # User selected ...\HiKAT -> append \Launcher
     StrCpy $INSTDIR "$INSTDIR\Launcher"
   ${Else}
-    # User selected parent folder (e.g. D:\, C:\Program Files) -> append \HiKAT\Launcher
-    StrCpy $INSTDIR "$INSTDIR\HiKAT\Launcher"
+    StrCpy $R9 "$INSTDIR" 1 -1
+    ${If} $R9 == "\"
+      StrCpy $INSTDIR "$INSTDIRHiKAT\Launcher"
+    ${Else}
+      StrCpy $INSTDIR "$INSTDIR\HiKAT\Launcher"
+    ${EndIf}
   ${EndIf}
 FunctionEnd
+
+!macro customPageAfterChangeDir
+  !undef MUI_PAGE_CUSTOMFUNCTION_PRE
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE HiKatInstFilesPre
+!macroend
 
 !macro customInstall
   ${IfNot} ${isUpdated}

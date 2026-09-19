@@ -36,16 +36,16 @@ function isPackagedApp() {
  * In development, falls back to process.env.HIKAT_ROOT or canonical %APPDATA%/HiKAT.
  */
 function getHiKatRoot() {
-  if (process.env.HIKAT_ROOT && process.env.HIKAT_ROOT.trim()) {
-    return path.resolve(process.env.HIKAT_ROOT.trim())
-  }
-
   if (isPackagedApp()) {
     const exeDir = path.dirname(process.execPath)
     if (path.basename(exeDir).toLowerCase() === "launcher") {
       return path.dirname(exeDir)
     }
     return exeDir
+  }
+
+  if (process.env.HIKAT_ROOT && process.env.HIKAT_ROOT.trim()) {
+    return path.resolve(process.env.HIKAT_ROOT.trim())
   }
 
   const app = getElectronApp()

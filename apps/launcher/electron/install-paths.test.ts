@@ -73,6 +73,33 @@ describe("Install Paths Resolver Suite", () => {
     }
   })
 
+  it("3b. Packaged mode with HIKAT_ROOT set: process.execPath always wins over HIKAT_ROOT override", () => {
+    process.env.HIKAT_ROOT = path.resolve("E:/IgnoredDevOverride/HiKAT")
+    const mockExe = path.resolve("D:/RealInstall/HiKAT/Launcher/HiKAT Launcher.exe")
+    Object.defineProperty(process, "execPath", {
+      value: mockExe,
+      configurable: true,
+      writable: true,
+    })
+
+    const electronMock = require("electron")
+    const originalIsPackaged = electronMock.app?.isPackaged
+    if (electronMock.app) {
+      electronMock.app.isPackaged = true
+    }
+
+    try {
+      expect(getLauncherRoot()).toBe(path.dirname(mockExe))
+      expect(getHiKatRoot()).toBe(path.resolve("D:/RealInstall/HiKAT"))
+      expect(getGamesRoot()).toBe(path.resolve("D:/RealInstall/HiKAT/games"))
+      expect(getRuntimeRoot()).toBe(path.resolve("D:/RealInstall/HiKAT/runtime"))
+    } finally {
+      if (electronMock.app) {
+        electronMock.app.isPackaged = originalIsPackaged
+      }
+    }
+  })
+
   it("4. Development fallback: resolves HiKAT root to canonical appData when not packaged and HIKAT_ROOT unset", () => {
     const electronMock = require("electron")
     const originalIsPackaged = electronMock.app?.isPackaged

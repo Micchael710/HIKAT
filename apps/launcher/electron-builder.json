@@ -26,6 +26,7 @@
     "allowElevation": true,
     "differentialPackage": false,
     "deleteAppDataOnUninstall": false,
+    "warningsAsErrors": false,
     "include": "installer/customInstall.nsh"
   }
 }
