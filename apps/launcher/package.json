@@ -3,8 +3,8 @@
   "productName": "HiKAT Launcher",
   "description": "HiKAT Launcher",
   "private": true,
-  "version": "1.0.0",
-  "author": "HiKAT Team",
+  "version": "1.0.1",
+  "author": "HiKAT Studios",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

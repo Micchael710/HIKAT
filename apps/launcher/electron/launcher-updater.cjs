@@ -107,7 +107,8 @@ function runLauncherUpdateBootstrap(splashWindow, customUpdater = null, customAp
 
         if (splashWindow && !splashWindow.isDestroyed()) {
           splashWindow.webContents.send("updater:status", {
-            message: `Descargando actualización (v${targetVer})...`,
+            state: "downloading",
+            message: "DESCARGANDO ACTUALIZACION",
           })
         }
 
@@ -134,7 +135,9 @@ function runLauncherUpdateBootstrap(splashWindow, customUpdater = null, customAp
 
         if (splashWindow && !splashWindow.isDestroyed()) {
           splashWindow.webContents.send("updater:status", {
-            message: "Instalando actualización y reiniciando...",
+            state: "installing",
+            message: "INSTALANDO ACTUALIZACION",
+            submessage: "HiKAT se reiniciará automáticamente al finalizar.",
           })
           splashWindow.webContents.send("updater:progress", {
             percent: 100,
@@ -154,7 +157,7 @@ function runLauncherUpdateBootstrap(splashWindow, customUpdater = null, customAp
             console.error("[AutoUpdater] Error during quitAndInstall:", quitErr)
             app.quit()
           }
-        }, 1200)
+        }, 1800)
 
         finish({ updated: true })
       })

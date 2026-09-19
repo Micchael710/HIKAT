@@ -149,6 +149,11 @@ describe("HiKAT Launcher Auto-Updater Service Suite", () => {
         total: 100 * 1024 * 1024,
       })
 
+      expect(mockSplash.webContents.send).toHaveBeenCalledWith("updater:status", {
+        state: "downloading",
+        message: "DESCARGANDO ACTUALIZACION",
+      })
+
       expect(mockSplash.webContents.send).toHaveBeenCalledWith(
         "updater:progress",
         expect.objectContaining({ percent: 50 }),
@@ -157,8 +162,14 @@ describe("HiKAT Launcher Auto-Updater Service Suite", () => {
       // Simulate update-downloaded
       mockUpdater.emit("update-downloaded", { version: "1.0.1" })
 
-      // Advance timer for UI grace period before restart
-      vi.advanceTimersByTime(1500)
+      expect(mockSplash.webContents.send).toHaveBeenCalledWith("updater:status", {
+        state: "installing",
+        message: "INSTALANDO ACTUALIZACION",
+        submessage: "HiKAT se reiniciará automáticamente al finalizar.",
+      })
+
+      // Advance timer for UI grace period before restart (1800ms)
+      vi.advanceTimersByTime(2000)
 
       const result = await promise
       expect(result.updated).toBe(true)
