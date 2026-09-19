@@ -5,8 +5,8 @@
 
 /**
  * HiKAT Launcher NSIS Installer Customizations
- * - Modern single-screen assisted setup using nsDialogs and native Windows folder picker
- * - Official HiKAT branding with cat medallion logo
+ * - Clean assisted setup using nsDialogs and modern Windows IFileOpenDialog
+ * - Official HiKAT branding in upper-right header (installerHeader.bmp)
  * - Root path derivation: User picks parent folder -> displays <PARENT>\HiKAT
  * - Binary installed into <PARENT>\HiKAT\Launcher
  * - Sibling data directories <PARENT>\HiKAT\games and <PARENT>\HiKAT\runtime
@@ -14,12 +14,18 @@
  * - Updates: Skips setup UI during auto-updates (${isUpdated})
  */
 
+!define CLSID_FileOpenDialog "{DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7}"
+!define IID_IFileDialog      "{42F85136-DB7E-439C-85F1-E4075D135FC8}"
+!define IID_IShellItem       "{43826D1E-E718-42EE-BC55-A1E261C37BFE}"
+!define CLSCTX_INPROC_SERVER 1
+!define FOS_PICKFOLDERS      0x00000020
+!define FOS_FORCEFILESYSTEM  0x00000040
+!define SIGDN_FILESYSPATH    0x80058000
+
 Var /GLOBAL HiKatRoot
 Var /GLOBAL Dialog
 Var /GLOBAL TxtLocation
 Var /GLOBAL BtnBrowse
-Var /GLOBAL HwndImage
-Var /GLOBAL ImageHandle
 Var /GLOBAL TitleFont
 
 !macro customWelcomePage
@@ -64,6 +70,62 @@ Var /GLOBAL TitleFont
     Pop $R0
   FunctionEnd
 
+  Function SelectModernFolder
+    StrCpy $R1 ""
+
+    # Initialize COM library
+    System::Call "ole32::CoInitialize(p 0)"
+
+    # Create IFileOpenDialog instance
+    System::Call "ole32::CoCreateInstance(g '${CLSID_FileOpenDialog}', p 0, i ${CLSCTX_INPROC_SERVER}, g '${IID_IFileDialog}', *p .r1) i.r2"
+
+    ${If} $2 == 0
+      # Combine existing options with FOS_PICKFOLDERS (0x20) and FOS_FORCEFILESYSTEM (0x40)
+      System::Call "$1->10(*i .r3)" ; GetOptions
+      IntOp $3 $3 | 0x60
+      System::Call "$1->9(i $3)"    ; SetOptions
+
+      System::Call "$1->17(w 'Selecciona la carpeta donde deseas instalar HiKAT')" ; SetTitle
+
+      # Set initial folder if $R0 exists on disk
+      ${If} $R0 != ""
+        ${If} ${FileExists} "$R0"
+          System::Call "shell32::SHCreateItemFromParsingName(w '$R0', p 0, g '${IID_IShellItem}', *p .r4) i.r5"
+          ${If} $5 == 0
+            System::Call "$1->12(p $4)" ; SetFolder
+            System::Call "$4->2()"       ; Release IShellItem
+          ${EndIf}
+        ${EndIf}
+      ${EndIf}
+
+      # Display modern Windows Explorer file/folder picker modal dialog
+      System::Call "$1->3(p $HWNDPARENT) i.r2" ; Show
+      ${If} $2 == 0
+        # User confirmed folder selection
+        System::Call "$1->20(*p .r4) i.r2" ; GetResult -> IShellItem
+        ${If} $2 == 0
+          System::Call "$4->5(i ${SIGDN_FILESYSPATH}, *p .r5) i.r2" ; GetDisplayName (SIGDN_FILESYSPATH)
+          ${If} $2 == 0
+            System::Call "*$5(&w1024 .r6)"
+            StrCpy $R1 "$6"
+            System::Call "ole32::CoTaskMemFree(p $5)"
+          ${EndIf}
+          System::Call "$4->2()" ; Release IShellItem
+        ${EndIf}
+      ${EndIf}
+
+      # Release IFileDialog
+      System::Call "$1->2()"
+    ${Else}
+      # Fallback for systems where COM IFileOpenDialog is unavailable
+      nsDialogs::SelectFolderDialog "Selecciona la carpeta donde deseas instalar HiKAT" "$R0"
+      Pop $R1
+      ${If} $R1 == "error"
+        StrCpy $R1 ""
+      ${EndIf}
+    ${EndIf}
+  FunctionEnd
+
   Function OnBrowseClick
     Pop $0 # HWND of button
 
@@ -73,11 +135,9 @@ Var /GLOBAL TitleFont
       StrCpy $R0 "$HiKatRoot"
     ${EndIf}
 
-    nsDialogs::SelectFolderDialog "Selecciona la carpeta donde deseas instalar HiKAT" "$R0"
-    Pop $R1
+    Call SelectModernFolder
 
-    ${If} $R1 != "error"
-    ${AndIf} $R1 != ""
+    ${If} $R1 != ""
       Push $R1
       Call DeriveHiKatRoot
 
@@ -117,39 +177,27 @@ Var /GLOBAL TitleFont
     GetDlgItem $0 $HWNDPARENT 3
     ShowWindow $0 ${SW_HIDE}
 
-    # 1. Official HiKAT Logo (212x80 px -> 141u x 53u)
-    ${NSD_CreateBitmap} 10u 8u 141u 53u ""
-    Pop $HwndImage
-    SetCtlColors $HwndImage 0x000000 0xFFFFFF
-    File "/oname=$PLUGINSDIR\hikat-logo.bmp" "${PROJECT_DIR}\installer\resources\hikat-logo.bmp"
-    ${NSD_SetStretchedImage} $HwndImage "$PLUGINSDIR\hikat-logo.bmp" $ImageHandle
-
-    # 2. Title: Instalar HiKAT Launcher
-    ${NSD_CreateLabel} 10u 66u 280u 14u "Instalar HiKAT Launcher"
+    # Title: Instalar HiKAT Launcher
+    ${NSD_CreateLabel} 15u 18u 270u 16u "Instalar HiKAT Launcher"
     Pop $0
     SetCtlColors $0 0x111827 0xFFFFFF
     CreateFont $TitleFont "Segoe UI" 12 700
     SendMessage $0 ${WM_SETFONT} $TitleFont 1
 
-    # 3. Subtitle / Description
-    ${NSD_CreateLabel} 10u 82u 280u 11u "HiKAT y sus componentes se instalarán en la siguiente ubicación:"
+    # Subtitle / Label: Ubicación de instalación:
+    ${NSD_CreateLabel} 15u 42u 270u 12u "Ubicación de instalación:"
     Pop $0
-    SetCtlColors $0 0x4B5563 0xFFFFFF
+    SetCtlColors $0 0x374151 0xFFFFFF
 
-    # 4. Location display text control
-    ${NSD_CreateText} 10u 96u 220u 14u "$HiKatRoot"
+    # Location display text control
+    ${NSD_CreateText} 15u 58u 205u 14u "$HiKatRoot"
     Pop $TxtLocation
     SetCtlColors $TxtLocation 0x111827 0xF9FAFB
 
-    # 5. Browse button using native Windows folder picker
-    ${NSD_CreateButton} 234u 95u 56u 16u "Examinar..."
+    # Browse button using modern Windows folder picker
+    ${NSD_CreateButton} 225u 57u 60u 16u "Examinar..."
     Pop $BtnBrowse
     ${NSD_OnClick} $BtnBrowse OnBrowseClick
-
-    # 6. Explanatory subtext
-    ${NSD_CreateLabel} 10u 114u 280u 18u "Se configurarán automáticamente las carpetas para Launcher, games y runtime."
-    Pop $0
-    SetCtlColors $0 0x6B7280 0xFFFFFF
 
     nsDialogs::Show
   FunctionEnd
@@ -169,11 +217,6 @@ Var /GLOBAL TitleFont
     ${If} $INSTDIR == ""
       MessageBox MB_ICONSTOP|MB_OK "Ruta de instalación no válida."
       Abort
-    ${EndIf}
-
-    ${If} $ImageHandle != 0
-      ${NSD_FreeBitmap} $ImageHandle
-      StrCpy $ImageHandle 0
     ${EndIf}
   FunctionEnd
 

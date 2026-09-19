@@ -1,7 +1,7 @@
 /**
  * Converts existing HiKAT launcher branding assets into NSIS-compatible formats.
  * Source assets:
- * - apps/launcher/src/assets/branding/logo-black.png -> installer/resources/hikat-logo.bmp
+ * - apps/launcher/src/assets/branding/logo-black.png -> installer/resources/installerHeader.bmp (150x57)
  * - apps/launcher/src/assets/branding/logo-windows.png -> installer/resources/icon.ico
  */
 
@@ -17,18 +17,29 @@ if (!fs.existsSync(OUT_DIR)) {
   fs.mkdirSync(OUT_DIR, { recursive: true })
 }
 
-// 1. Generate hikat-logo.bmp from logo-black.png
+// 1. Generate installerHeader.bmp (150x57) from logo-black.png
 const logoBlackPath = path.join(BRANDING_DIR, "logo-black.png")
 if (fs.existsSync(logoBlackPath)) {
   const src = decode(fs.readFileSync(logoBlackPath))
-  const targetW = 212
-  const targetH = 80
-  const rgbBuf = Buffer.alloc(targetW * targetH * 3)
+  const targetW = 150
+  const targetH = 57
 
-  for (let y = 0; y < targetH; y++) {
-    for (let x = 0; x < targetW; x++) {
-      const gx = (x / targetW) * (src.width - 1)
-      const gy = (y / targetH) * (src.height - 1)
+  const padX = 4
+  const padY = 2
+  const availW = targetW - padX * 2
+  const availH = targetH - padY * 2
+  const scale = Math.min(availW / src.width, availH / src.height)
+  const drawW = Math.round(src.width * scale)
+  const drawH = Math.round(src.height * scale)
+  const offsetX = Math.floor((targetW - drawW) / 2)
+  const offsetY = Math.floor((targetH - drawH) / 2)
+
+  const rgbBuf = Buffer.alloc(targetW * targetH * 3, 255) // Pure white background (#FFFFFF)
+
+  for (let y = 0; y < drawH; y++) {
+    for (let x = 0; x < drawW; x++) {
+      const gx = (x / (drawW - 1)) * (src.width - 1)
+      const gy = (y / (drawH - 1)) * (src.height - 1)
       const gxi = Math.floor(gx)
       const gyi = Math.floor(gy)
       const c00 = (gyi * src.width + gxi) * 4
@@ -50,10 +61,14 @@ if (fs.existsSync(logoBlackPath)) {
       const b = interp(2)
       const a = interp(3) / 255
 
-      // Composite over pure white background (#FFFFFF)
-      rgbBuf[(y * targetW + x) * 3] = Math.round(r * a + 255 * (1 - a))
-      rgbBuf[(y * targetW + x) * 3 + 1] = Math.round(g * a + 255 * (1 - a))
-      rgbBuf[(y * targetW + x) * 3 + 2] = Math.round(b * a + 255 * (1 - a))
+      const destX = offsetX + x
+      const destY = offsetY + y
+      const idx = (destY * targetW + destX) * 3
+
+      // Composite over white background
+      rgbBuf[idx] = Math.round(r * a + 255 * (1 - a))
+      rgbBuf[idx + 1] = Math.round(g * a + 255 * (1 - a))
+      rgbBuf[idx + 2] = Math.round(b * a + 255 * (1 - a))
     }
   }
 
@@ -85,8 +100,8 @@ if (fs.existsSync(logoBlackPath)) {
     }
   }
 
-  fs.writeFileSync(path.join(OUT_DIR, "hikat-logo.bmp"), bmpBuf)
-  console.log("Generated hikat-logo.bmp (" + targetW + "x" + targetH + ")")
+  fs.writeFileSync(path.join(OUT_DIR, "installerHeader.bmp"), bmpBuf)
+  console.log("Generated installerHeader.bmp (" + targetW + "x" + targetH + ")")
 }
 
 // 2. Generate icon.ico from logo-windows.png

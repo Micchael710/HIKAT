@@ -26,6 +26,7 @@
     "differentialPackage": false,
     "deleteAppDataOnUninstall": false,
     "installerIcon": "installer/resources/icon.ico",
+    "installerHeader": "installer/resources/installerHeader.bmp",
     "warningsAsErrors": false,
     "include": "installer/customInstall.nsh"
   }
