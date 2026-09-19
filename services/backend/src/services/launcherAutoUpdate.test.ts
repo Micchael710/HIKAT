@@ -415,7 +415,7 @@ describe("HiKAT Launcher Auto-Update & Release Management Suite", () => {
       )
     })
 
-    it("rejects deleting an ARCHIVED release", async () => {
+    it("deletes an ARCHIVED release from both R2 storage and D1 database", async () => {
       // 1. Publish 1.4.0
       const ticket1 = await requestLauncherReleaseUploadTicket(db, env, {
         version: "1.4.0",
@@ -447,9 +447,19 @@ describe("HiKAT Launcher Auto-Update & Release Management Suite", () => {
       await publishLauncherRelease(db, r2.id)
 
       // Now r1 is ARCHIVED
-      await expect(deleteLauncherRelease(db, env, r1.id)).rejects.toThrow(
-        "Solo se pueden eliminar versiones en estado borrador (DRAFT)",
-      )
+      const listBefore = await getLauncherReleases(db)
+      const archived = listBefore.find((r) => r.id === r1.id)
+      expect(archived?.status).toBe("ARCHIVED")
+      expect(await mockR2.get(ticket1.objectKey)).not.toBeNull()
+
+      // Deleting r1 must succeed
+      const deleted = await deleteLauncherRelease(db, env, r1.id)
+      expect(deleted).toBe(true)
+
+      // Verify removed from R2 and D1
+      expect(await mockR2.get(ticket1.objectKey)).toBeNull()
+      const listAfter = await getLauncherReleases(db)
+      expect(listAfter.some((r) => r.id === r1.id)).toBe(false)
     })
   })
 })

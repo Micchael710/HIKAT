@@ -398,9 +398,9 @@ export async function deleteLauncherRelease(
     )
   }
 
-  if (release.status !== "DRAFT") {
+  if (release.status !== "DRAFT" && release.status !== "ARCHIVED") {
     throw createGraphQLError(
-      "Solo se pueden eliminar versiones en estado borrador (DRAFT).",
+      "Solo se pueden eliminar versiones en estado borrador (DRAFT) o archivadas (ARCHIVED).",
       "VALIDATION_ERROR",
     )
   }

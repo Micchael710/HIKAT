@@ -532,6 +532,7 @@ export default function LauncherReleasesView({ theme }: LauncherReleasesViewProp
                       const isPub = rel.status === "PUBLISHED"
                       const isArchived = rel.status === "ARCHIVED"
                       const isDraft = rel.status === "DRAFT"
+                      const canDelete = !isPub // DRAFT or ARCHIVED
                       const canPublish =
                         !isPub &&
                         (!publishedRelease || compareVersions(rel.version, publishedRelease.version) > 0)
@@ -603,7 +604,7 @@ export default function LauncherReleasesView({ theme }: LauncherReleasesViewProp
                                   Publicar
                                 </button>
                               )}
-                              {isDraft && (
+                              {canDelete && (
                                 <button
                                   onClick={() => setDeleteTarget(rel)}
                                   style={{
