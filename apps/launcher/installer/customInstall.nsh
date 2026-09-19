@@ -369,16 +369,7 @@ Var /GLOBAL HiKatRootToDelete
   Section "un.CleanHiKatRemaining"
     ${If} $DeleteDataSelected == "1"
     ${AndIf} $HiKatRootToDelete != ""
-      # 1. Delete downloaded games
-      RMDir /r "$HiKatRootToDelete\games"
-
-      # 2. Delete shared runtime
-      RMDir /r "$HiKatRootToDelete\runtime"
-
-      # 3. Clean any additional files inside the HiKAT root folder
-      Delete "$HiKatRootToDelete\*.*"
-
-      # 4. Clean local user data inside AppData
+      # 1. Clean local user data inside AppData
       SetShellVarContext current
       RMDir /r "$APPDATA\HiKAT"
       RMDir /r "$APPDATA\hikat-launcher"
@@ -387,9 +378,9 @@ Var /GLOBAL HiKatRootToDelete
       SetShellVarContext all
       RMDir /r "$APPDATA\HiKAT"
 
-      # 5. Remove the main HiKAT folder once Launcher and all contents are gone
+      # 2. Recursively remove the entire validated HiKAT root folder (games, runtime, and all contents)
       SetOutPath $TEMP
-      RMDir "$HiKatRootToDelete"
+      RMDir /r "$HiKatRootToDelete"
     ${EndIf}
   SectionEnd
 !macroend
