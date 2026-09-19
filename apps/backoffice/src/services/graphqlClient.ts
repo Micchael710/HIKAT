@@ -3220,6 +3220,132 @@ export const serverWhitelistApi = {
   },
 }
 
+export const launcherApi = {
+  async getLauncherReleases(): Promise<import("../types").LauncherReleaseItem[]> {
+    const query = /* GraphQL */ `
+      query LauncherReleases {
+        launcherReleases {
+          id
+          version
+          status
+          filename
+          sizeBytes
+          sha512
+          notes
+          createdAt
+          publishedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ launcherReleases: import("../types").LauncherReleaseItem[] }>(query)
+    return data.launcherReleases
+  },
+
+  async getPublishedLauncherRelease(): Promise<import("../types").LauncherReleaseItem | null> {
+    const query = /* GraphQL */ `
+      query PublishedLauncherRelease {
+        publishedLauncherRelease {
+          id
+          version
+          status
+          filename
+          sizeBytes
+          sha512
+          notes
+          createdAt
+          publishedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ publishedLauncherRelease: import("../types").LauncherReleaseItem | null }>(query)
+    return data.publishedLauncherRelease
+  },
+
+  async requestLauncherReleaseUploadTicket(input: {
+    version: string
+    filename: string
+    declaredSizeBytes: number
+    sha512: string
+  }): Promise<import("../types").LauncherUploadTicketPayload> {
+    const mutation = /* GraphQL */ `
+      mutation RequestLauncherReleaseUploadTicket(
+        $version: String!
+        $filename: String!
+        $declaredSizeBytes: Int!
+        $sha512: String!
+      ) {
+        requestLauncherReleaseUploadTicket(
+          version: $version
+          filename: $filename
+          declaredSizeBytes: $declaredSizeBytes
+          sha512: $sha512
+        ) {
+          ticketId
+          uploadToken
+          version
+          filename
+          objectKey
+          declaredSizeBytes
+          sha512
+          bucketName
+          endpoint
+          credentials {
+            accessKeyId
+            secretAccessKey
+            sessionToken
+          }
+          expiresAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ requestLauncherReleaseUploadTicket: import("../types").LauncherUploadTicketPayload }>(mutation, input)
+    return data.requestLauncherReleaseUploadTicket
+  },
+
+  async completeLauncherReleaseUpload(input: {
+    uploadToken: string
+    notes?: string | null
+  }): Promise<import("../types").LauncherReleaseItem> {
+    const mutation = /* GraphQL */ `
+      mutation CompleteLauncherReleaseUpload($uploadToken: String!, $notes: String) {
+        completeLauncherReleaseUpload(uploadToken: $uploadToken, notes: $notes) {
+          id
+          version
+          status
+          filename
+          sizeBytes
+          sha512
+          notes
+          createdAt
+          publishedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ completeLauncherReleaseUpload: import("../types").LauncherReleaseItem }>(mutation, input)
+    return data.completeLauncherReleaseUpload
+  },
+
+  async publishLauncherRelease(id: string): Promise<import("../types").LauncherReleaseItem> {
+    const mutation = /* GraphQL */ `
+      mutation PublishLauncherRelease($id: ID!) {
+        publishLauncherRelease(id: $id) {
+          id
+          version
+          status
+          filename
+          sizeBytes
+          sha512
+          notes
+          createdAt
+          publishedAt
+        }
+      }
+    `
+    const data = await executeGraphQL<{ publishLauncherRelease: import("../types").LauncherReleaseItem }>(mutation, { id })
+    return data.publishLauncherRelease
+  },
+}
+
 export const graphqlClient = {
   ...newsApi,
   ...serverApi,
@@ -3229,6 +3355,7 @@ export const graphqlClient = {
   ...modProvidersApi,
   ...serverContentApi,
   ...serverWhitelistApi,
+  ...launcherApi,
 }
 
 

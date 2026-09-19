@@ -1265,3 +1265,31 @@ export interface ServerReleaseSyncResultGql {
   status: ServerReleaseSyncStatusEnumGql
 }
 
+export type LauncherReleaseStatusGql = "DRAFT" | "PUBLISHED" | "ARCHIVED"
+
+export interface LauncherReleaseGql {
+  id: string
+  version: string
+  status: LauncherReleaseStatusGql
+  filename: string
+  sizeBytes: number
+  sha512: string
+  notes?: string | null
+  createdAt: string
+  publishedAt?: string | null
+}
+
+export interface LauncherUploadTicketPayloadGql {
+  ticketId: string
+  uploadToken: string
+  version: string
+  filename: string
+  objectKey: string
+  declaredSizeBytes: number
+  sha512: string
+  bucketName: string
+  endpoint: string
+  credentials: R2TemporaryCredentialsGql
+  expiresAt: string
+}
+

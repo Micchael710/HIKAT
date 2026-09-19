@@ -8,6 +8,7 @@ import { dashboardTypeDefs } from "./dashboard"
 import { skinsTypeDefs } from "./skins"
 import { gameTypeDefs } from "./game"
 import { settingsTypeDefs } from "./settings"
+import { launcherTypeDefs } from "./launcher"
 
 export * from "./common"
 export * from "./user"
@@ -19,6 +20,7 @@ export * from "./dashboard"
 export * from "./skins"
 export * from "./game"
 export * from "./settings"
+export * from "./launcher"
 
 export const typeDefs = [
   commonTypeDefs,
@@ -31,4 +33,5 @@ export const typeDefs = [
   skinsTypeDefs,
   gameTypeDefs,
   settingsTypeDefs,
+  launcherTypeDefs,
 ].join("\n\n")

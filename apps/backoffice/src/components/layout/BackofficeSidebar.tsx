@@ -10,6 +10,7 @@ import {
   IconGamepad,
   IconSettings,
   IconArrowLeft,
+  IconRocket,
 } from "../../theme/icons"
 
 interface BackofficeSidebarProps {
@@ -41,6 +42,11 @@ export default function BackofficeSidebar({
       key: "skins",
       label: "Skins",
       icon: <IconShirt size={24} />,
+    },
+    {
+      key: "launcher",
+      label: "Launcher",
+      icon: <IconRocket size={24} />,
     },
     {
       key: "settings",

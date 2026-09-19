@@ -11,7 +11,7 @@ export type { ServerStatus, ServerPowerAction }
 
 export type ThemeMode = "dark" | "light"
 
-export type BackofficeGlobalSection = "servers" | "skins" | "settings"
+export type BackofficeGlobalSection = "servers" | "skins" | "launcher" | "settings"
 export type ServerWorkspaceSection = "dashboard" | "news" | "server" | "game" | "server-settings"
 export type BackofficeSection = BackofficeGlobalSection | ServerWorkspaceSection
 
@@ -975,6 +975,38 @@ export interface ServerWhitelist {
 export interface HikatWhitelistCandidate {
   displayName: string
   skinImageUrl: string | null
+}
+
+export type LauncherReleaseStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED"
+
+export interface LauncherReleaseItem {
+  id: string
+  version: string
+  status: LauncherReleaseStatus
+  filename: string
+  sizeBytes: number
+  sha512: string
+  notes?: string | null
+  createdAt: string
+  publishedAt?: string | null
+}
+
+export interface LauncherUploadTicketPayload {
+  ticketId: string
+  uploadToken: string
+  version: string
+  filename: string
+  objectKey: string
+  declaredSizeBytes: number
+  sha512: string
+  bucketName: string
+  endpoint: string
+  credentials: {
+    accessKeyId: string
+    secretAccessKey: string
+    sessionToken: string
+  }
+  expiresAt: string
 }
 
 

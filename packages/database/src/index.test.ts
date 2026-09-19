@@ -790,6 +790,7 @@ describe("@hikat/database schema and D1 operations", () => {
       "0026_game_releases_single_draft_per_server.sql",
       "0027_users_display_name_immutable.sql",
       "0028_server_managed_content_provider_hashes.sql",
+      "0029_launcher_releases.sql",
     ])
 
     // Apply all migrations wrapped in transaction per D1 standard
@@ -2532,6 +2533,41 @@ describe("@hikat/database schema and D1 operations", () => {
     sqlite.exec("DELETE FROM users WHERE id = 'u-admin';")
     const remainingTokens = sqlite.prepare("SELECT COUNT(*) as count FROM game_file_upload_tokens").get() as any
     expect(remainingTokens.count).toBe(0)
+  })
+
+  it("supports launcherReleases and launcherUploadTickets with referential integrity and unique constraints", () => {
+    const d1 = createTestD1()
+    const sqlite = d1._sqlite
+    const now = new Date().toISOString()
+
+    sqlite.exec(
+      `INSERT INTO users (id, display_name, role, created_at, updated_at) ` +
+        `VALUES ('u-launcher-admin', 'LauncherAdmin', 'ADMIN', '${now}', '${now}');`,
+    )
+
+    // Insert launcher upload ticket
+    sqlite.exec(
+      `INSERT INTO launcher_upload_tickets (id, token_hash, version, filename, declared_size_bytes, sha512, created_by, expires_at, created_at) ` +
+        `VALUES ('tok-1', 'hash-1', '1.1.0', 'HiKAT Launcher Setup 1.1.0.exe', 135000000, 'base64sha512', 'u-launcher-admin', '${now}', '${now}');`,
+    )
+
+    // Insert launcher release in DRAFT
+    sqlite.exec(
+      `INSERT INTO launcher_releases (id, version, status, filename, object_key, size_bytes, sha512, created_by, created_at) ` +
+        `VALUES ('rel-1', '1.1.0', 'DRAFT', 'HiKAT Launcher Setup 1.1.0.exe', 'launcher/releases/1.1.0/HiKAT Launcher Setup 1.1.0.exe', 135000000, 'base64sha512', 'u-launcher-admin', '${now}');`,
+    )
+
+    // Verify uniqueness of version
+    expect(() => {
+      sqlite.exec(
+        `INSERT INTO launcher_releases (id, version, status, filename, object_key, size_bytes, sha512, created_by, created_at) ` +
+          `VALUES ('rel-2', '1.1.0', 'DRAFT', 'HiKAT.exe', 'key', 100, 'sha', 'u-launcher-admin', '${now}');`,
+      )
+    }).toThrow(/UNIQUE constraint failed/i)
+
+    // Verify foreign key integrity
+    const fkErrors = sqlite.prepare("PRAGMA foreign_key_check;").all()
+    expect(fkErrors).toEqual([])
   })
 })
 

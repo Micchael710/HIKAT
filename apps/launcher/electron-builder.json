@@ -7,6 +7,10 @@
   "directories": {
     "output": "dist-installer"
   },
+  "publish": {
+    "provider": "generic",
+    "url": "https://api.hikat.xyz/launcher/update"
+  },
   "files": [
     "dist/**/*",
     "electron/**/*",

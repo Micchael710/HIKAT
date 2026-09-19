@@ -106,7 +106,17 @@ import type {
   CompleteGameFileBatchUploadInputGql,
   InstallModPlansBatchInputGql,
   HikatWhitelistCandidateGql,
+  LauncherReleaseGql,
+  LauncherUploadTicketPayloadGql,
 } from "@hikat/graphql"
+
+import {
+  requestLauncherReleaseUploadTicket,
+  completeLauncherReleaseUpload,
+  publishLauncherRelease,
+  getLauncherReleases,
+  getPublishedLauncherRelease,
+} from "../services/launcherReleaseService"
 
 import {
   HIKAT_VERSION,
@@ -1107,6 +1117,31 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return getAdminSettings(context.db)
+    },
+
+    // --- Launcher Releases Queries (Phase 2) ---
+
+    launcherReleases: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<LauncherReleaseGql[]> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getLauncherReleases(context.db)
+    },
+
+    publishedLauncherRelease: async (
+      _parent: unknown,
+      _args: unknown,
+      context: BackendGraphQLContext,
+    ): Promise<LauncherReleaseGql | null> => {
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return getPublishedLauncherRelease(context.db)
     },
   },
 
@@ -2202,6 +2237,62 @@ export const resolvers = {
         throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
       }
       return updateAdminSettings(context.db, args.input, identity.userId)
+    },
+
+    // --- Launcher Releases Mutations (Phase 2) ---
+
+    requestLauncherReleaseUploadTicket: async (
+      _parent: unknown,
+      args: {
+        version: string
+        filename: string
+        declaredSizeBytes: number
+        sha512: string
+      },
+      context: BackendGraphQLContext,
+    ): Promise<LauncherUploadTicketPayloadGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return requestLauncherReleaseUploadTicket(context.db, context.env, {
+        version: args.version,
+        filename: args.filename,
+        declaredSizeBytes: args.declaredSizeBytes,
+        sha512: args.sha512,
+        adminUserId: identity.userId,
+      })
+    },
+
+    completeLauncherReleaseUpload: async (
+      _parent: unknown,
+      args: {
+        uploadToken: string
+        notes?: string | null
+      },
+      context: BackendGraphQLContext,
+    ): Promise<LauncherReleaseGql> => {
+      const identity = requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return completeLauncherReleaseUpload(context.db, context.env, {
+        uploadToken: args.uploadToken,
+        notes: args.notes,
+        adminUserId: identity.userId,
+      })
+    },
+
+    publishLauncherRelease: async (
+      _parent: unknown,
+      args: { id: string },
+      context: BackendGraphQLContext,
+    ): Promise<LauncherReleaseGql> => {
+      requireAdmin(context)
+      if (!context.db) {
+        throw createGraphQLError("Database unavailable", "INTERNAL_ERROR")
+      }
+      return publishLauncherRelease(context.db, args.id)
     },
   },
 }

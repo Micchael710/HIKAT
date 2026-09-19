@@ -26,6 +26,7 @@
     "@xmcl/file-transfer": "2.1.2",
     "@xmcl/installer": "6.3.2",
     "axios": "^1.19.0",
+    "electron-updater": "^6.8.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "skinview-utils": "^0.7.1",

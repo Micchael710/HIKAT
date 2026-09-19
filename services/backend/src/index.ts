@@ -43,6 +43,11 @@ import {
   handleMinecraftCapeServe,
 } from "./services/minecraftTextureService"
 
+import {
+  handleLatestYaml,
+  handleLauncherBinaryDownload,
+} from "./services/launcherUpdateTransport"
+
 export * from "./types"
 
 export * from "./auth/verifier"
@@ -86,6 +91,10 @@ export * from "./resolvers"
 export * from "./releaseEvents"
 
 export * from "./services/proxyService"
+
+export * from "./services/launcherReleaseService"
+
+export * from "./services/launcherUpdateTransport"
 
 const KNOWN_SAFE_CODES = [
   "UNAUTHENTICATED",
@@ -312,6 +321,22 @@ export default {
 
       const id = env.RELEASE_EVENTS!.idFromName("global")
       return env.RELEASE_EVENTS!.get(id).fetch(request)
+    }
+
+    // Launcher Auto-Update Routes (Phase 2 - electron-updater compatibility)
+    if (url.pathname === "/launcher/update/latest.yml") {
+      if (request.method === "GET" || request.method === "HEAD") {
+        return handleLatestYaml(request, env, db)
+      }
+      return new Response("Method Not Allowed", { status: 405 })
+    }
+
+    if (url.pathname.startsWith("/launcher/update/download/")) {
+      const rawFilename = url.pathname.slice("/launcher/update/download/".length)
+      if (request.method === "GET" || request.method === "HEAD") {
+        return handleLauncherBinaryDownload(request, env, db, rawFilename)
+      }
+      return new Response("Method Not Allowed", { status: 405 })
     }
 
     // Internal OCI Minecraft Proxy Endpoints (Phase 1)

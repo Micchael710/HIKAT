@@ -10,6 +10,7 @@ import NewsListView from "./components/news/NewsListView"
 import ServerOverviewView from "./components/server/ServerOverviewView"
 import DashboardView from "./components/dashboard/DashboardView"
 import SkinsView from "./components/skins/SkinsView"
+import LauncherReleasesView from "./components/launcher/LauncherReleasesView"
 import GameView from "./components/game/GameView"
 import SettingsView from "./components/settings/SettingsView"
 
@@ -127,6 +128,7 @@ function BackofficeShell({
                 <ServersView theme={theme} onSelectServer={handleSelectServer} />
               )}
               {section === "skins" && <SkinsView theme={theme} />}
+              {section === "launcher" && <LauncherReleasesView theme={theme} />}
               {section === "settings" && <SettingsView theme={theme} />}
             </>
           )}

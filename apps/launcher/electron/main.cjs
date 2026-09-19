@@ -9,6 +9,8 @@ const { setJavaGpuPreference } = require("./gpu-manager.cjs")
 const { SettingsStore } = require("./settings-store.cjs")
 const { SecureAuthStore } = require("./secure-auth-store.cjs")
 const { parseValidOAuthCallbackUrl } = require("./url-utils.cjs")
+const { runLauncherUpdateBootstrap } = require("./launcher-updater.cjs")
+let updateCheckPromise = null
 
 // Single instance lock to prevent duplicate launcher instances and focus existing instance
 const singleInstanceLock = app.requestSingleInstanceLock()
@@ -649,6 +651,7 @@ function createSplashWindow() {
     webPreferences: {
       devTools: false,
       contextIsolation: true,
+      preload: path.join(__dirname, "splash-preload.cjs"),
     },
   })
 
@@ -657,6 +660,7 @@ function createSplashWindow() {
   splashWindow.once("ready-to-show", () => {
     if (splashWindow && !splashWindow.isDestroyed()) {
       splashWindow.show()
+      updateCheckPromise = runLauncherUpdateBootstrap(splashWindow)
     }
   })
 }
@@ -818,7 +822,21 @@ async function createWindow() {
   const startTime = Date.now()
   const MIN_SPLASH_TIME = 3800
 
-  mainWindow.once("ready-to-show", () => {
+  mainWindow.once("ready-to-show", async () => {
+    let updateResult = { updated: false }
+    if (splashWindow && !splashWindow.isDestroyed() && updateCheckPromise) {
+      try {
+        updateResult = await updateCheckPromise
+      } catch (err) {
+        console.warn("[AutoUpdater] Error awaiting update bootstrap:", err)
+      }
+    }
+
+    if (updateResult && updateResult.updated) {
+      console.log("[AutoUpdater] Update downloaded and relaunch initiated. Suppressing main window presentation.")
+      return
+    }
+
     const elapsed = Date.now() - startTime
     const remainingTime = Math.max(0, MIN_SPLASH_TIME - elapsed)
 
