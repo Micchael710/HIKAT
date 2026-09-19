@@ -21,11 +21,11 @@
   },
   "nsis": {
     "oneClick": false,
-    "allowToChangeInstallationDirectory": true,
-    "perMachine": false,
+    "perMachine": true,
     "allowElevation": true,
     "differentialPackage": false,
     "deleteAppDataOnUninstall": false,
+    "installerIcon": "installer/resources/icon.ico",
     "warningsAsErrors": false,
     "include": "installer/customInstall.nsh"
   }

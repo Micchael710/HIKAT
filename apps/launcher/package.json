@@ -17,8 +17,8 @@
     "desktop": "electron .",
     "format": "oxfmt src",
     "postinstall": "node scripts/ensure-xmcl-core-utils.cjs",
-    "dist": "electron-builder --win",
-    "build:installer": "vite build && electron-builder --win"
+    "dist": "node scripts/prepare-installer-assets.cjs && electron-builder --win",
+    "build:installer": "node scripts/prepare-installer-assets.cjs && vite build && electron-builder --win"
   },
   "dependencies": {
     "@hikat/shared": "workspace:*",
