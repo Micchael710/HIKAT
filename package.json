@@ -30,6 +30,9 @@
     "vitest": "^3.0.0"
   },
   "pnpm": {
+    "overrides": {
+      "undici": "7.29.1"
+    },
     "patchedDependencies": {
       "@xmcl/file-transfer@2.1.2": "patches/@xmcl__file-transfer@2.1.2.patch"
     }

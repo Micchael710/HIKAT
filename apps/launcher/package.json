@@ -30,7 +30,8 @@
     "react-dom": "^19.0.0",
     "skinview-utils": "^0.7.1",
     "skinview3d": "^3.4.2",
-    "three": "^0.156.1"
+    "three": "^0.156.1",
+    "undici": "7.29.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
