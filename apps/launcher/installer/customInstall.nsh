@@ -32,6 +32,15 @@ Var /GLOBAL UnDialog
 Var /GLOBAL UnTitleFont
 Var /GLOBAL ChkDeleteData
 Var /GLOBAL DeleteDataSelected
+Var /GLOBAL HiKatRootToDelete
+
+# If building uninstaller, ensure components page is silently skipped so user goes straight to welcome page
+!ifdef BUILD_UNINSTALLER
+  Function un.SkipComponentsPage
+    Abort
+  FunctionEnd
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE un.SkipComponentsPage
+!endif
 
 !macro customWelcomePage
   Function DeriveHiKatRoot
@@ -276,7 +285,9 @@ Var /GLOBAL DeleteDataSelected
 
 !macro customUnInit
   StrCpy $DeleteDataSelected "0"
+  StrCpy $HiKatRootToDelete ""
 !macroend
+
 
 !macro customUnWelcomePage
   Function un.HiKatUninstallPageCreate
@@ -327,15 +338,16 @@ Var /GLOBAL DeleteDataSelected
 !macroend
 
 !macro customUnInstall
+  StrCpy $HiKatRootToDelete ""
   ${If} $DeleteDataSelected == "1"
-    # Derive HiKAT Root from $INSTDIR (<HiKatRoot>\Launcher)
+    # Derive HiKAT Root from $INSTDIR (<HiKatRoot>\Launcher) while $INSTDIR still exists on disk
     ${GetParent} "$INSTDIR" $0
     ${GetFileName} "$0" $R1
     ${GetFileName} "$INSTDIR" $R2
 
     # Robust Safety Validation:
     # 1. $0 must not be empty
-    # 2. $0 must end with "HiKAT" (the folder must strictly be named HiKAT)
+    # 2. $0 must end with "HiKAT" (parent folder must strictly be named HiKAT)
     # 3. $INSTDIR must end with "Launcher"
     # 4. $0 must not be a drive root or system folder
     ${If} $0 != ""
@@ -347,16 +359,26 @@ Var /GLOBAL DeleteDataSelected
     ${AndIf} $0 != "C:\"
     ${AndIf} $0 != "D:\"
     ${AndIf} $0 != "E:\"
-      # Delete downloaded games
-      RMDir /r "$0\games"
+      # Save the validated HiKAT root. Electron-builder will then delete $INSTDIR (Launcher).
+      StrCpy $HiKatRootToDelete "$0"
+    ${EndIf}
+  ${EndIf}
+!macroend
 
-      # Delete shared runtime
-      RMDir /r "$0\runtime"
+!macro customUnInstallSection
+  Section "un.CleanHiKatRemaining"
+    ${If} $DeleteDataSelected == "1"
+    ${AndIf} $HiKatRootToDelete != ""
+      # 1. Delete downloaded games
+      RMDir /r "$HiKatRootToDelete\games"
 
-      # Clean any additional temporary files inside HiKAT root
-      Delete "$0\*.*"
+      # 2. Delete shared runtime
+      RMDir /r "$HiKatRootToDelete\runtime"
 
-      # Clean user data inside AppData
+      # 3. Clean any additional files inside the HiKAT root folder
+      Delete "$HiKatRootToDelete\*.*"
+
+      # 4. Clean local user data inside AppData
       SetShellVarContext current
       RMDir /r "$APPDATA\HiKAT"
       RMDir /r "$APPDATA\hikat-launcher"
@@ -365,9 +387,11 @@ Var /GLOBAL DeleteDataSelected
       SetShellVarContext all
       RMDir /r "$APPDATA\HiKAT"
 
-      # Remove the main HiKAT folder once no content remains
-      RMDir "$0"
+      # 5. Remove the main HiKAT folder once Launcher and all contents are gone
+      SetOutPath $TEMP
+      RMDir "$HiKatRootToDelete"
     ${EndIf}
-  ${EndIf}
+  SectionEnd
 !macroend
+
 
