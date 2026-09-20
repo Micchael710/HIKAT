@@ -7,7 +7,7 @@ import {
   applyServerReleaseSync,
   syncServerIntegrityJson,
 } from "./serverReleaseSyncService"
-import { prepareGameDraft, publishGameRelease } from "../game/releaseService"
+import { prepareGameDraft, publishGameRelease, hasServerRelevantChanges } from "../game/releaseService"
 import { updateAdminSettings } from "../settingsService"
 
 function createMockD1() {
@@ -2237,6 +2237,78 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
       const lastLog = syncLogs[syncLogs.length - 1]
       const details = JSON.parse(lastLog.details)
       expect(details.toUpdate).toBe(1)
+    })
+
+    it("hasServerRelevantChanges correctly tracks identity of two local mods without provider", async () => {
+      const nowIso = new Date().toISOString()
+      const jarA = await createValidJar([0x50, 0x4b, 0x03, 0x04, 0xaa, 0x11])
+      const jarB = await createValidJar([0x50, 0x4b, 0x03, 0x04, 0xbb, 0x22])
+
+      // Current state in server_managed_content has two local mods without provider/projectId
+      await db.insert(schema.serverManagedContent).values([
+        {
+          id: "smc-local-a",
+          managementSource: "GAME_RELEASE",
+          provider: null,
+          projectId: null,
+          targetPath: "mods/custom-a.jar",
+          sha256: jarA.sha256,
+          sizeBytes: jarA.bytes.length,
+          name: "custom-a.jar",
+          contentType: "MOD",
+          environment: "BOTH",
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        },
+        {
+          id: "smc-local-b",
+          managementSource: "GAME_RELEASE",
+          provider: null,
+          projectId: null,
+          targetPath: "mods/custom-b.jar",
+          sha256: jarB.sha256,
+          sizeBytes: jarB.bytes.length,
+          name: "custom-b.jar",
+          contentType: "MOD",
+          environment: "BOTH",
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        },
+      ])
+
+      const draftFileA: any = {
+        id: "grf-local-a",
+        name: "custom-a.jar",
+        logicalPath: "mods/custom-a.jar",
+        category: "MOD",
+        sha256: jarA.sha256,
+        sizeBytes: jarA.bytes.length,
+        isDirectory: false,
+        sourceEnvironment: "BOTH",
+        sourceProvider: null,
+        sourceProjectId: null,
+      }
+
+      const draftFileB: any = {
+        id: "grf-local-b",
+        name: "custom-b.jar",
+        logicalPath: "mods/custom-b.jar",
+        category: "MOD",
+        sha256: jarB.sha256,
+        sizeBytes: jarB.bytes.length,
+        isDirectory: false,
+        sourceEnvironment: "BOTH",
+        sourceProvider: null,
+        sourceProjectId: null,
+      }
+
+      // Case A: Both local mods remain unchanged
+      const hasChangesBothSame = await hasServerRelevantChanges(db, [draftFileA, draftFileB])
+      expect(hasChangesBothSame).toBe(false)
+
+      // Case B: One of the local mods (custom-a.jar) is removed, leaving only custom-b.jar
+      const hasChangesOneRemoved = await hasServerRelevantChanges(db, [draftFileB])
+      expect(hasChangesOneRemoved).toBe(true)
     })
   })
 })

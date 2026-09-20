@@ -459,7 +459,10 @@ export async function hasServerRelevantChanges(
     const matched = currentServerManaged.find(
       (c) =>
         c.gameReleaseFileId === desired.id ||
-        (c.provider === desired.sourceProvider && c.projectId === desired.sourceProjectId) ||
+        (Boolean(c.projectId) &&
+          Boolean(desired.sourceProjectId) &&
+          c.projectId === desired.sourceProjectId &&
+          (c.provider || null) === (desired.sourceProvider || null)) ||
         c.targetPath === `mods/${desired.name}`,
     )
     if (!matched) {
@@ -481,8 +484,11 @@ export async function hasServerRelevantChanges(
     const matchedDesired = desiredBothMods.find(
       (d) =>
         d.id === current.gameReleaseFileId ||
-        (d.sourceProvider === current.provider && d.sourceProjectId === current.projectId) ||
-        `mods/${d.name}` === current.targetPath,
+        (Boolean(current.projectId) &&
+          Boolean(d.sourceProjectId) &&
+          d.sourceProjectId === current.projectId &&
+          (d.sourceProvider || null) === (current.provider || null)) ||
+        current.targetPath === `mods/${d.name}`,
     )
     if (!matchedDesired) {
       return true // Mod removed on server

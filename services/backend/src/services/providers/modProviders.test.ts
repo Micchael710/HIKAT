@@ -6467,6 +6467,226 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(plan.isValid).toBe(false)
       expect(plan.conflicts.some((c) => c.includes("no existe en el proveedor"))).toBe(true)
     })
+
+    it("resolveInstallationPlan does not block root mod when provider throws 500/timeout on manualOverride version lookup", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+
+        if (u.includes("/project/root-mod-timeout/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-root-timeout",
+                project_id: "root-mod-timeout",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar", primary: true }],
+                dependencies: [
+                  {
+                    project_id: "dep-proj-timeout",
+                    dependency_type: "required",
+                  },
+                ],
+              },
+            ],
+          }
+        }
+        if (u.includes("/version/v-root-timeout")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-root-timeout",
+              project_id: "root-mod-timeout",
+              version_number: "1.0.0",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar", primary: true }],
+              dependencies: [
+                {
+                  project_id: "dep-proj-timeout",
+                  dependency_type: "required",
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("/project/root-mod-timeout")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "root-mod-timeout",
+              title: "Root Mod",
+              project_type: "mod",
+              client_side: "required",
+              server_side: "required",
+            }),
+          }
+        }
+
+        if (u.includes("/project/dep-proj-timeout")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "dep-proj-timeout",
+              title: "Timeout Dependency",
+              project_type: "mod",
+              client_side: "required",
+              server_side: "required",
+            }),
+          }
+        }
+
+        // The manual version endpoint fails with 500 (temporary error)
+        if (u.includes("/version/v-manual-failing")) {
+          return { ok: false, status: 500 }
+        }
+
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-mod-timeout",
+        versionId: "v-root-timeout",
+        contentType: "MOD",
+        manualOverrides: [
+          {
+            provider: "MODRINTH",
+            projectId: "dep-proj-timeout",
+            versionId: "v-manual-failing",
+          },
+        ],
+      })
+
+      // Must NOT block root mod; isValid remains true
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts).toHaveLength(0)
+      expect(plan.items).toHaveLength(1)
+      expect(plan.items[0]?.projectId).toBe("root-mod-timeout")
+      expect(plan.unresolvedDependencies).toHaveLength(1)
+      expect(plan.unresolvedDependencies[0]?.projectId).toBe("dep-proj-timeout")
+      expect(plan.unresolvedDependencies[0]?.versionId).toBe("v-manual-failing")
+      expect(plan.warnings.some((w) => w.includes("Error temporal"))).toBe(true)
+    })
+
+    it("resolveInstallationPlan rejects with conflict when manualOverride versionId belongs to a different project", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+
+        if (u.includes("/project/root-mod-mismatch/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-root-mismatch",
+                project_id: "root-mod-mismatch",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar", primary: true }],
+                dependencies: [
+                  {
+                    project_id: "dep-proj-A",
+                    dependency_type: "required",
+                  },
+                ],
+              },
+            ],
+          }
+        }
+        if (u.includes("/version/v-root-mismatch")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-root-mismatch",
+              project_id: "root-mod-mismatch",
+              version_number: "1.0.0",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar", primary: true }],
+              dependencies: [
+                {
+                  project_id: "dep-proj-A",
+                  dependency_type: "required",
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("/project/root-mod-mismatch")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "root-mod-mismatch",
+              title: "Root Mod",
+              project_type: "mod",
+              client_side: "required",
+              server_side: "required",
+            }),
+          }
+        }
+
+        if (u.includes("/project/dep-proj-A")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "dep-proj-A",
+              title: "Dependency Project A",
+              project_type: "mod",
+              client_side: "required",
+              server_side: "required",
+            }),
+          }
+        }
+
+        // Version v-from-B actually belongs to project dep-proj-B!
+        if (u.includes("/version/v-from-B")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-from-B",
+              project_id: "dep-proj-B",
+              version_number: "1.0.0",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "alien-mod.jar", size: 1000, url: "https://cdn/alien.jar", primary: true }],
+              dependencies: [],
+            }),
+          }
+        }
+
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-mod-mismatch",
+        versionId: "v-root-mismatch",
+        contentType: "MOD",
+        manualOverrides: [
+          {
+            provider: "MODRINTH",
+            projectId: "dep-proj-A",
+            versionId: "v-from-B",
+          },
+        ],
+      })
+
+      expect(plan.isValid).toBe(false)
+      expect(plan.conflicts).toContain("La versión manual seleccionada no pertenece a la dependencia seleccionada.")
+      expect(plan.items.some((i) => i.projectId === "dep-proj-A" || i.projectId === "dep-proj-B")).toBe(false)
+    })
   })
 })
 

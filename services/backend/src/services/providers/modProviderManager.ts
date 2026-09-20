@@ -2049,13 +2049,47 @@ export class ModProviderManager {
         let manualVersionObj: NormalizedModVersion | null = null
 
         if (manualDepOverride?.versionId) {
-          manualVersionObj = await depAdapter
-            .getVersion(env, manualDepOverride.versionId, depProjectId, manualDepOverride.contentType || undefined)
-            .catch(() => null)
+          let manualFetchFailed = false
+          try {
+            manualVersionObj = await depAdapter.getVersion(
+              env,
+              manualDepOverride.versionId,
+              depProjectId,
+              manualDepOverride.contentType || undefined,
+            )
+          } catch {
+            manualFetchFailed = true
+          }
 
-          if (!manualVersionObj) {
+          if (manualFetchFailed) {
+            const reason = `Error temporal al consultar la versión manual seleccionada "${manualDepOverride.versionId}" para la dependencia "${dep.projectName || depProjectId}".`
+            warnings.push(reason)
+            let allVers: NormalizedModVersion[] = []
+            if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+              allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
+            }
+            unresolvedDependencies.push({
+              provider: current.provider,
+              projectId: depProjectId,
+              versionId: manualDepOverride.versionId,
+              projectName: dep.projectName || null,
+              contentType: null,
+              reason,
+              allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
+            })
+            continue
+          }
+
+          if (manualVersionObj === null) {
             conflicts.push(
               `La versión manual seleccionada (${manualDepOverride.versionId}) para "${dep.projectName || depProjectId}" no existe en el proveedor.`,
+            )
+            continue
+          }
+
+          if (manualVersionObj.projectId && depProjectId && manualVersionObj.projectId !== depProjectId) {
+            conflicts.push(
+              `La versión manual seleccionada no pertenece a la dependencia seleccionada.`,
             )
             continue
           }
@@ -2324,24 +2358,59 @@ export class ModProviderManager {
             (v) => v.id === overrideVersionId || v.fileId === overrideVersionId,
           )
           if (!selectedDepVersion) {
-            const forcedVer =
+            let forcedVer: NormalizedModVersion | null = null
+            let forcedVerFailed = false
+
+            if (
               manualVersionObj &&
               (manualVersionObj.id === overrideVersionId || manualVersionObj.fileId === overrideVersionId)
-                ? manualVersionObj
-                : await depAdapter
-                    .getVersion(env, overrideVersionId, depProjectId, depContentType)
-                    .catch(() => null)
-            if (forcedVer) {
-              selectedDepVersion = forcedVer
-              warnings.push(
-                `Se forzó manualmente la versión "${forcedVer.versionNumber || forcedVer.id}" para "${depProject?.name || dep.projectName || depProjectId}". Verifique la compatibilidad en juego.`,
-              )
+            ) {
+              forcedVer = manualVersionObj
             } else {
+              try {
+                forcedVer = await depAdapter.getVersion(env, overrideVersionId, depProjectId, depContentType)
+              } catch {
+                forcedVerFailed = true
+              }
+            }
+
+            if (forcedVerFailed) {
+              const reason = `Error temporal al consultar la versión manual seleccionada "${overrideVersionId}" para "${dep.projectName || depProjectId}".`
+              warnings.push(reason)
+              let allVers: NormalizedModVersion[] = []
+              if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+                allVers = await depAdapter.getProjectVersions(env, depProjectId, depContentType).catch(() => [])
+              }
+              unresolvedDependencies.push({
+                provider: current.provider,
+                projectId: depProjectId,
+                versionId: overrideVersionId,
+                projectName: dep.projectName || null,
+                contentType: depContentType,
+                reason,
+                allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
+              })
+              continue
+            }
+
+            if (forcedVer === null) {
               conflicts.push(
                 `La versión manual seleccionada (${overrideVersionId}) para "${dep.projectName || depProjectId}" no existe en el proveedor.`,
               )
               continue
             }
+
+            if (forcedVer.projectId && depProjectId && forcedVer.projectId !== depProjectId) {
+              conflicts.push(
+                `La versión manual seleccionada no pertenece a la dependencia seleccionada.`,
+              )
+              continue
+            }
+
+            selectedDepVersion = forcedVer
+            warnings.push(
+              `Se forzó manualmente la versión "${forcedVer.versionNumber || forcedVer.id}" para "${depProject?.name || dep.projectName || depProjectId}". Verifique la compatibilidad en juego.`,
+            )
           }
         } else if (pinnedId) {
           // Priority 2: Explicitly pinned versionId by provider

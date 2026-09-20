@@ -951,7 +951,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                     )}
                   </div>
                   <div style={{ fontSize: "11px", color: tokens.textSecondary, marginTop: "6px" }}>
-                    Esta elección se aplicará también a dependencias obligatorias de CurseForge cuyo entorno no se pueda determinar.
+                    Esta elección se aplicará también a dependencias obligatorias cuyo entorno no se pueda determinar.
                   </div>
                 </div>
               )}
