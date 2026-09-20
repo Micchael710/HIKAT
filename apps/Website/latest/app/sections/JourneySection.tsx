@@ -5,6 +5,8 @@ import { SectionHeading } from "../components/ui/SectionHeading";
 import { Card } from "../components/ui/Card";
 import { DynamicBadgeIcon, IconArrowRight } from "../components/ui/Icons";
 
+import { ScrollReveal } from "../components/ui/ScrollReveal";
+
 export interface JourneySectionProps {
   content: JourneyContent;
 }
@@ -24,7 +26,12 @@ const JourneyStepCard: React.FC<{ step: JourneyStepType }> = ({ step }) => {
   };
 
   return (
-    <Card className="flex-1 p-6 sm:p-7 flex items-center gap-5 group hover:border-white/30 transition-all bg-[#121a22]/75 backdrop-blur-xl border-white/[0.1]">
+    <Card
+      interactive
+      enableTilt
+      enableSpotlight
+      className="flex-1 p-6 sm:p-7 flex items-center gap-5 group hover:border-white/30 transition-all bg-[#121a22]/75 backdrop-blur-xl border-white/[0.1] h-full"
+    >
       <div
         className={`w-16 h-16 rounded-2xl border flex items-center justify-center flex-shrink-0 transition-transform duration-200 group-hover:scale-105 ${getBadgeStyle(
           step.badgeType
@@ -36,7 +43,7 @@ const JourneyStepCard: React.FC<{ step: JourneyStepType }> = ({ step }) => {
         <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight leading-snug">
           {step.title}
         </h3>
-        <p className="text-xs sm:text-sm text-[#8899aa] leading-relaxed mt-1">
+        <p className="text-xs sm:text-sm text-[#8899aa] leading-relaxed mt-1 font-normal">
           {step.description}
         </p>
       </div>
@@ -48,19 +55,23 @@ export const JourneySection: React.FC<JourneySectionProps> = ({ content }) => {
   return (
     <div className="w-full">
       <Container className="!max-w-[1520px]">
-        {/* Section Heading with large scale */}
-        <SectionHeading
-          eyebrow={content.eyebrow}
-          title={content.title}
-          description={content.description}
-          className="!mb-8"
-        />
+        {/* Section Heading with ScrollReveal */}
+        <ScrollReveal delay={0}>
+          <SectionHeading
+            eyebrow={content.eyebrow}
+            title={content.title}
+            description={content.description}
+            className="!mb-8"
+          />
+        </ScrollReveal>
 
-        {/* 3 Step Sequence with circular arrow connectors */}
+        {/* 3 Step Sequence with staggered ScrollReveal and circular arrow connectors */}
         <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-4 sm:gap-5">
           {content.steps.map((step, index) => (
             <React.Fragment key={step.order}>
-              <JourneyStepCard step={step} />
+              <ScrollReveal delay={index * 70} className="flex-1 h-full">
+                <JourneyStepCard step={step} />
+              </ScrollReveal>
 
               {/* Connecting arrow separator in desktop */}
               {index < content.steps.length - 1 && (

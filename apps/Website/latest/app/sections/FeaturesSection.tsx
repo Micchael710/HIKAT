@@ -5,18 +5,31 @@ import { SectionHeading } from "../components/ui/SectionHeading";
 import { Card } from "../components/ui/Card";
 import { ButtonLink } from "../components/ui/Button";
 import { IconDownload, IconArrowRight } from "../components/ui/Icons";
+import { ScrollReveal } from "../components/ui/ScrollReveal";
+import { useCardMotion } from "../hooks/useCardMotion";
 
 export interface FeaturesSectionProps {
   content: FeaturesSectionContent;
 }
 
 const SecondaryFeatureCard: React.FC<{ item: FeatureItemType }> = ({ item }) => {
+  const motionRef = useCardMotion<HTMLAnchorElement>({
+    enableTilt: true,
+    maxTilt: 1.0,
+    enableSpotlight: true,
+  });
+
   return (
     <a
+      ref={motionRef}
       href={item.href}
-      className="flex-1 p-5 sm:p-6 flex items-center justify-between gap-4 sm:gap-5 rounded-[22px] border border-white/[0.09] bg-[#121a22]/75 hover:bg-[#121a22]/90 hover:border-white/25 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.45)] transition-all group focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 cursor-pointer select-none"
+      className="has-micro-tilt relative overflow-hidden flex-1 p-5 sm:p-6 flex items-center justify-between gap-4 sm:gap-5 rounded-[22px] border border-white/[0.09] bg-[#121a22]/75 hover:bg-[#121a22]/90 hover:border-white/25 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.45)] transition-all group focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 cursor-pointer select-none"
     >
-      <div className="flex items-center gap-4 sm:gap-5 min-w-0 flex-1">
+      {/* Spotlight and luminous border */}
+      <div className="card-spotlight-layer" aria-hidden="true" />
+      <div className="card-spotlight-border" aria-hidden="true" />
+
+      <div className="relative z-10 flex items-center gap-4 sm:gap-5 min-w-0 flex-1">
         {/* Large square thumbnail with clean rounded corners and isolated overflow */}
         <div className="w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 rounded-2xl overflow-hidden bg-[#090d12] flex-shrink-0 border border-white/[0.08] relative isolate">
           <img
@@ -38,7 +51,7 @@ const SecondaryFeatureCard: React.FC<{ item: FeatureItemType }> = ({ item }) => 
         </div>
       </div>
 
-      <div className="flex-shrink-0">
+      <div className="relative z-10 flex-shrink-0">
         <span
           className="w-10 h-10 rounded-full bg-white/[0.06] border border-white/[0.1] flex items-center justify-center text-[#8899aa] group-hover:text-white group-hover:bg-white/[0.12] group-hover:border-white/25 transition-all shadow-sm"
           aria-hidden="true"
@@ -65,18 +78,25 @@ export const FeaturesSection: React.FC<FeaturesSectionProps> = ({ content }) => 
 
       <Container className="relative z-10 !max-w-[1520px]">
         {/* Section Heading with seamlessly aligned View All CTA */}
-        <SectionHeading
-          title={content.title}
-          description={content.description}
-          action={content.viewAllAction}
-          className="!mb-8 sm:!mb-10"
-        />
+        <ScrollReveal delay={0}>
+          <SectionHeading
+            title={content.title}
+            description={content.description}
+            action={content.viewAllAction}
+            className="!mb-8 sm:!mb-10"
+          />
+        </ScrollReveal>
 
         {/* 2-Column Split: Dominant Featured Card on Left (7 cols), 3 Stacked Secondary Cards on Right (5 cols) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
           {/* Featured Dominant Card on Left */}
-          <div className="lg:col-span-7 flex">
-            <Card className="relative w-full min-h-[500px] sm:min-h-[560px] lg:min-h-[600px] p-7 sm:p-10 flex flex-col justify-end overflow-hidden rounded-[26px] border border-white/[0.1] bg-[#121a22]/85 backdrop-blur-xl shadow-[0_12px_40px_rgba(0,0,0,0.5)]">
+          <ScrollReveal delay={0} className="lg:col-span-7 flex">
+            <Card
+              interactive
+              enableTilt
+              enableSpotlight
+              className="relative w-full min-h-[500px] sm:min-h-[560px] lg:min-h-[600px] p-7 sm:p-10 flex flex-col justify-end overflow-hidden rounded-[26px] border border-white/[0.1] bg-[#121a22]/85 backdrop-blur-xl shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
+            >
               {/* Absolute internal media layer with rounded-[inherit] preventing any border clipping */}
               {featured.backgroundImage && (
                 <div className="absolute inset-0 overflow-hidden pointer-events-none select-none rounded-[inherit]">
@@ -128,12 +148,14 @@ export const FeaturesSection: React.FC<FeaturesSectionProps> = ({ content }) => 
                 </div>
               </div>
             </Card>
-          </div>
+          </ScrollReveal>
 
           {/* 3 Secondary Stacked Cards on Right */}
           <div className="lg:col-span-5 flex flex-col justify-between gap-4 sm:gap-5">
-            {secondaryItems.map((item) => (
-              <SecondaryFeatureCard key={item.id} item={item} />
+            {secondaryItems.map((item, index) => (
+              <ScrollReveal key={item.id} delay={index * 60} className="flex-1 flex">
+                <SecondaryFeatureCard item={item} />
+              </ScrollReveal>
             ))}
           </div>
         </div>

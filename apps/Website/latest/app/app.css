@@ -188,6 +188,68 @@ body {
   animation: mouseWheelFloat 1.8s ease-in-out infinite;
 }
 
+/* Interactive Motion: Spotlight & Luminous Border */
+.card-spotlight-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+  border-radius: inherit;
+  opacity: var(--spotlight-opacity, 0);
+  transition: opacity 0.35s ease;
+  background: radial-gradient(
+    360px circle at var(--mouse-x, -999px) var(--mouse-y, -999px),
+    rgba(6, 182, 212, 0.08),
+    rgba(255, 255, 255, 0.03) 40%,
+    transparent 70%
+  );
+  z-index: 2;
+}
+
+.card-spotlight-border {
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  user-select: none;
+  border-radius: inherit;
+  padding: 1px;
+  opacity: var(--spotlight-opacity, 0);
+  transition: opacity 0.35s ease;
+  background: radial-gradient(
+    280px circle at var(--mouse-x, -999px) var(--mouse-y, -999px),
+    rgba(255, 255, 255, 0.32),
+    rgba(6, 182, 212, 0.25) 30%,
+    transparent 65%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  z-index: 3;
+}
+
+/* Subtle Glass Micro-tilt */
+@media (hover: hover) and (pointer: fine) {
+  .has-micro-tilt {
+    transform: perspective(1000px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+    will-change: transform;
+    transform-style: preserve-3d;
+  }
+}
+
+/* Scroll Reveal Motion */
+.reveal-on-scroll {
+  opacity: 0;
+  transform: translateY(22px);
+  transition: opacity 0.55s cubic-bezier(0.16, 1, 0.3, 1), transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.reveal-on-scroll.is-revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;
@@ -195,4 +257,17 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  .reveal-on-scroll {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  .has-micro-tilt {
+    transform: none !important;
+  }
+  .card-spotlight-layer,
+  .card-spotlight-border {
+    display: none !important;
+  }
 }
+

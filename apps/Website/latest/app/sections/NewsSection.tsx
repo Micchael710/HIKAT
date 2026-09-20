@@ -3,17 +3,29 @@ import type { NewsSectionContent, NewsItem as NewsItemType } from "../content/ty
 import { Card } from "../components/ui/Card";
 import { IconArrowRight } from "../components/ui/Icons";
 
+import { useCardMotion } from "../hooks/useCardMotion";
+
 export interface NewsSectionProps {
   content: NewsSectionContent;
 }
 
 const NewsCardItem: React.FC<{ item: NewsItemType }> = ({ item }) => {
+  const motionRef = useCardMotion<HTMLAnchorElement>({
+    enableTilt: false,
+    enableSpotlight: true,
+  });
+
   return (
     <a
+      ref={motionRef}
       href={item.href}
-      className="group flex items-center gap-3.5 p-2.5 sm:p-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/20 transition-all duration-200"
+      className="relative overflow-hidden group flex items-center gap-3.5 p-2.5 sm:p-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/20 transition-all duration-200"
     >
-      <div className="w-20 h-16 sm:w-24 sm:h-18 rounded-xl overflow-hidden flex-shrink-0 bg-[#090d12] border border-white/[0.08] relative isolate">
+      {/* Spotlight layer */}
+      <div className="card-spotlight-layer" aria-hidden="true" />
+      <div className="card-spotlight-border" aria-hidden="true" />
+
+      <div className="relative z-10 w-20 h-16 sm:w-24 sm:h-18 rounded-xl overflow-hidden flex-shrink-0 bg-[#090d12] border border-white/[0.08] relative isolate">
         <img
           src={item.imageUrl}
           alt={item.title}
@@ -23,11 +35,11 @@ const NewsCardItem: React.FC<{ item: NewsItemType }> = ({ item }) => {
           }}
         />
       </div>
-      <div className="min-w-0 flex-1 space-y-1">
+      <div className="relative z-10 min-w-0 flex-1 space-y-1">
         <h4 className="text-xs sm:text-sm font-bold text-white group-hover:text-white transition-colors truncate">
           {item.title}
         </h4>
-        <p className="text-[11px] sm:text-xs text-[#8899aa] line-clamp-1 leading-snug">
+        <p className="text-[11px] sm:text-xs text-[#8899aa] line-clamp-1 leading-snug font-normal">
           {item.excerpt}
         </p>
         <span className="inline-block text-[10px] font-medium text-[#657788]">

@@ -11,12 +11,20 @@ import {
   IconMouseScroll,
 } from "../components/ui/Icons";
 
+import { useCardMotion } from "../hooks/useCardMotion";
+
 export interface HeroSectionProps {
   content: HeroContent;
   headerContent: HeaderContent;
 }
 
 const HeroCardItem: React.FC<{ card: HeroCardType }> = ({ card }) => {
+  const motionRef = useCardMotion<HTMLAnchorElement>({
+    enableTilt: true,
+    maxTilt: 1.2,
+    enableSpotlight: true,
+  });
+
   const getBadgeStyle = (type: string) => {
     switch (type) {
       case "launcher":
@@ -32,10 +40,15 @@ const HeroCardItem: React.FC<{ card: HeroCardType }> = ({ card }) => {
 
   return (
     <a
+      ref={motionRef}
       href={card.href}
-      className="p-5 sm:p-6 group flex items-center justify-between gap-4 rounded-[22px] border border-white/[0.09] bg-[#121a22]/75 hover:bg-[#121a22]/90 hover:border-white/25 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.45)] transition-all cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+      className="has-micro-tilt relative overflow-hidden p-5 sm:p-6 group flex items-center justify-between gap-4 rounded-[22px] border border-white/[0.09] bg-[#121a22]/75 hover:bg-[#121a22]/90 hover:border-white/25 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.45)] transition-all cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
     >
-      <div className="flex items-center gap-4 min-w-0 flex-1">
+      {/* Spotlight & luminous border */}
+      <div className="card-spotlight-layer" aria-hidden="true" />
+      <div className="card-spotlight-border" aria-hidden="true" />
+
+      <div className="relative z-10 flex items-center gap-4 min-w-0 flex-1">
         <div
           className={`w-14 h-14 rounded-2xl border flex items-center justify-center flex-shrink-0 transition-transform duration-200 group-hover:scale-105 ${getBadgeStyle(
             card.badgeType
@@ -53,7 +66,7 @@ const HeroCardItem: React.FC<{ card: HeroCardType }> = ({ card }) => {
         </div>
       </div>
 
-      <div className="flex-shrink-0">
+      <div className="relative z-10 flex-shrink-0">
         <span
           className="w-9 h-9 rounded-full bg-white/[0.06] border border-white/[0.1] flex items-center justify-center text-[#8899aa] group-hover:text-white group-hover:bg-white/[0.12] group-hover:border-white/25 transition-all shadow-sm"
           aria-hidden="true"
@@ -66,6 +79,7 @@ const HeroCardItem: React.FC<{ card: HeroCardType }> = ({ card }) => {
 };
 
 export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent }) => {
+  const sectionRef = useRef<HTMLElement>(null);
   const bgRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -75,25 +89,101 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
       return;
     }
 
+    const hoverQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const canHover = hoverQuery.matches;
+
     let rafId: number | null = null;
+    let scrollY = window.scrollY || window.pageYOffset;
+    let targetMouseX = 0;
+    let targetMouseY = 0;
+    let currentMouseX = 0;
+    let currentMouseY = 0;
+    let isRunning = false;
+
+    const render = () => {
+      if (!bgRef.current) {
+        isRunning = false;
+        return;
+      }
+
+      // Smooth lerp for mouse movement
+      if (canHover) {
+        currentMouseX += (targetMouseX - currentMouseX) * 0.08;
+        currentMouseY += (targetMouseY - currentMouseY) * 0.08;
+      } else {
+        currentMouseX = 0;
+        currentMouseY = 0;
+      }
+
+      const scrollParallax = scrollY * 0.22;
+      const finalX = currentMouseX.toFixed(2);
+      const finalY = (scrollParallax + currentMouseY).toFixed(2);
+
+      bgRef.current.style.transform = `translate3d(${finalX}px, ${finalY}px, 0) scale(1.12)`;
+
+      // Continue loop if mouse is still interpolating or scrolling in hero view
+      if (
+        canHover &&
+        (Math.abs(targetMouseX - currentMouseX) > 0.04 ||
+          Math.abs(targetMouseY - currentMouseY) > 0.04)
+      ) {
+        rafId = requestAnimationFrame(render);
+      } else {
+        isRunning = false;
+        rafId = null;
+      }
+    };
+
+    const startLoop = () => {
+      if (!isRunning) {
+        isRunning = true;
+        rafId = requestAnimationFrame(render);
+      }
+    };
 
     const handleScroll = () => {
-      if (rafId !== null) return;
+      scrollY = window.scrollY || window.pageYOffset;
+      if (scrollY < 1200) {
+        startLoop();
+      }
+    };
 
-      rafId = requestAnimationFrame(() => {
-        rafId = null;
-        const scrollY = window.scrollY || window.pageYOffset;
-        // Only calculate parallax when Hero is in viewport
-        if (scrollY < 1200 && bgRef.current) {
-          const offsetY = scrollY * 0.22;
-          bgRef.current.style.transform = `translate3d(0, ${offsetY}px, 0) scale(1.12)`;
-        }
-      });
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!canHover) return;
+      const section = sectionRef.current;
+      if (!section) return;
+
+      const rect = section.getBoundingClientRect();
+      const normX = ((e.clientX - rect.left) / rect.width - 0.5) * 2; // -1 to 1
+      const normY = ((e.clientY - rect.top) / rect.height - 0.5) * 2; // -1 to 1
+
+      // Very subtle depth: ±6px X, ±4px Y
+      targetMouseX = -normX * 6;
+      targetMouseY = -normY * 4;
+
+      startLoop();
+    };
+
+    const handleMouseLeave = () => {
+      targetMouseX = 0;
+      targetMouseY = 0;
+      startLoop();
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });
+
+    const sectionEl = sectionRef.current;
+    if (sectionEl && canHover) {
+      sectionEl.addEventListener("mousemove", handleMouseMove, { passive: true });
+      sectionEl.addEventListener("mouseleave", handleMouseLeave, { passive: true });
+    }
+
     return () => {
       window.removeEventListener("scroll", handleScroll);
+      if (sectionEl && canHover) {
+        sectionEl.removeEventListener("mousemove", handleMouseMove);
+        sectionEl.removeEventListener("mouseleave", handleMouseLeave);
+      }
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
       }
@@ -102,6 +192,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
 
   return (
     <section
+      ref={sectionRef}
       id="hero"
       className="relative min-h-[95vh] lg:min-h-screen flex flex-col justify-between pb-8"
     >

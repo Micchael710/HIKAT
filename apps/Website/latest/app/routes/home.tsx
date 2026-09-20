@@ -8,6 +8,7 @@ import { JourneySection } from "../sections/JourneySection";
 import { NewsSection } from "../sections/NewsSection";
 import { CommunitySection } from "../sections/CommunitySection";
 import { FeaturesSection } from "../sections/FeaturesSection";
+import { ScrollReveal } from "../components/ui/ScrollReveal";
 
 export function meta({}: Route.MetaArgs) {
   const content = getWebsiteContent();
@@ -105,10 +106,14 @@ export default function Home() {
             {/* Bottom part: Novedades & Comunidad Grid */}
             <Container className="!max-w-[1520px]">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-                <NewsSection content={content.news} />
-                <div className="h-full">
-                  <CommunitySection content={content.community} />
-                </div>
+                <ScrollReveal delay={0} className="h-full">
+                  <NewsSection content={content.news} />
+                </ScrollReveal>
+                <ScrollReveal delay={100} className="h-full">
+                  <div className="h-full">
+                    <CommunitySection content={content.community} />
+                  </div>
+                </ScrollReveal>
               </div>
             </Container>
           </div>
