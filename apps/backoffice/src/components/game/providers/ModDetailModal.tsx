@@ -100,7 +100,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
   const [installing, setInstalling] = useState(false)
   const [queuedOptionalIds, setQueuedOptionalIds] = useState<Set<string>>(new Set())
 
-  const isCurseForgeModUnknown =
+  const isModEnvironmentUnknown =
     currentContentType === "MOD" &&
     (detail?.environment === "UNKNOWN" || !detail?.environment)
 
@@ -219,7 +219,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
       return
     }
 
-    if (isCurseForgeModUnknown && !selectedEnvironmentOverride) {
+    if (isModEnvironmentUnknown && !selectedEnvironmentOverride) {
       setReleasePlan(null)
       setServerPlan(null)
       return
@@ -272,7 +272,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
             versionId: selectedVersionId,
             contentType: currentContentType,
             manualOverrides: overridesList.length > 0 ? overridesList : null,
-            environmentOverride: isCurseForgeModUnknown ? selectedEnvironmentOverride : undefined,
+            environmentOverride: isModEnvironmentUnknown ? selectedEnvironmentOverride : undefined,
             ...(loaderOverride ? { loaderOverride } : {}),
             includeAllVersions: manualMode,
           },
@@ -299,7 +299,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     currentContentType,
     selectedVersionId,
     manualOverrides,
-    isCurseForgeModUnknown,
+    isModEnvironmentUnknown,
     selectedEnvironmentOverride,
     serverId,
     isServer,
@@ -334,7 +334,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
           versionId: selectedVersionId,
           contentType: currentContentType,
           manualOverrides: overridesList.length > 0 ? overridesList : null,
-          environmentOverride: isCurseForgeModUnknown ? selectedEnvironmentOverride : undefined,
+          environmentOverride: isModEnvironmentUnknown ? selectedEnvironmentOverride : undefined,
           ...(loaderOverride ? { loaderOverride } : {}),
         },
         serverId,
@@ -405,7 +405,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
         versionNumber,
         contentType: currentContentType,
         manualOverrides: overridesList.length > 0 ? overridesList : null,
-        environmentOverride: isCurseForgeModUnknown ? selectedEnvironmentOverride || undefined : undefined,
+        environmentOverride: isModEnvironmentUnknown ? selectedEnvironmentOverride || undefined : undefined,
         loaderOverride: loaderOverride || undefined,
       })
       onClose()
@@ -721,8 +721,8 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                 {detail?.summary}
               </p>
 
-              {/* CurseForge Environment Selector for UNKNOWN environment MODs */}
-              {isCurseForgeModUnknown && (
+              {/* Environment Selector for UNKNOWN environment MODs */}
+              {isModEnvironmentUnknown && (
                 <div
                   style={{ marginBottom: "20px" }}
                   data-testid={isServer ? "server-curseforge-environment-selector" : "curseforge-environment-selector"}
@@ -1250,32 +1250,47 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                                     </span>
                                   )}
 
-                                  {!isServer && manualMode && item.availableCompatibleVersions?.length > 0 && (
-                                    <select
-                                      data-testid={`select-override-${item.projectId}`}
-                                      value={manualOverrides[itemKey] || item.versionId}
-                                      onChange={(e) =>
-                                        setManualOverrides((prev) => ({
-                                          ...prev,
-                                          [itemKey]: e.target.value,
-                                        }))
-                                      }
-                                      disabled={installing}
-                                      style={{
-                                        padding: "4px 8px",
-                                        background: "#1f2937",
-                                        border: "1px solid rgba(255, 255, 255, 0.15)",
-                                        borderRadius: "4px",
-                                        color: "#fff",
-                                        fontSize: "12px",
-                                      }}
-                                    >
-                                      {item.availableCompatibleVersions.map((v: any) => (
-                                        <option key={v.id || v.fileId} value={v.id || v.fileId || ""}>
-                                          {v.versionNumber} ({v.releaseType})
-                                        </option>
-                                      ))}
-                                    </select>
+                                  {!isServer && manualMode && (
+                                    (() => {
+                                      const versionsToDisplay = (item.allVersions && item.allVersions.length > 0)
+                                        ? item.allVersions
+                                        : (item.availableCompatibleVersions || [])
+                                      if (versionsToDisplay.length === 0) return null
+                                      return (
+                                        <select
+                                          data-testid={`select-override-${item.projectId}`}
+                                          value={manualOverrides[itemKey] || item.versionId}
+                                          onChange={(e) =>
+                                            setManualOverrides((prev) => ({
+                                              ...prev,
+                                              [itemKey]: e.target.value,
+                                            }))
+                                          }
+                                          disabled={installing}
+                                          style={{
+                                            padding: "4px 8px",
+                                            background: "#1f2937",
+                                            border: "1px solid rgba(255, 255, 255, 0.15)",
+                                            borderRadius: "4px",
+                                            color: "#fff",
+                                            fontSize: "12px",
+                                          }}
+                                        >
+                                          {versionsToDisplay.map((v: any) => {
+                                            const loadersStr = v.loaders && v.loaders.length > 0 ? v.loaders.join(", ") : ""
+                                            const mcStr = v.gameVersions && v.gameVersions.length > 0 ? v.gameVersions.join(", ") : ""
+                                            const parts = [v.versionNumber || v.name || v.id]
+                                            if (loadersStr) parts.push(loadersStr)
+                                            if (mcStr) parts.push(mcStr)
+                                            return (
+                                              <option key={v.id || v.fileId} value={v.id || v.fileId || ""}>
+                                                {parts.join(" — ")}
+                                              </option>
+                                            )
+                                          })}
+                                        </select>
+                                      )
+                                    })()
                                   )}
                                 </div>
                               </div>
@@ -1620,7 +1635,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                   (serverPlan.conflicts?.length ?? 0) > 0 ||
                   !selectedVersionId ||
                   isBothEnvironment ||
-                  Boolean(isCurseForgeModUnknown && !selectedEnvironmentOverride)
+                  Boolean(isModEnvironmentUnknown && !selectedEnvironmentOverride)
                 }
                 className="launcher-btn-primary"
                 style={{
@@ -1637,7 +1652,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                     (serverPlan.conflicts?.length ?? 0) > 0 ||
                     !selectedVersionId ||
                     isBothEnvironment ||
-                    Boolean(isCurseForgeModUnknown && !selectedEnvironmentOverride)
+                    Boolean(isModEnvironmentUnknown && !selectedEnvironmentOverride)
                       ? 0.5
                       : 1,
                   cursor:
@@ -1648,7 +1663,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                     (serverPlan.conflicts?.length ?? 0) > 0 ||
                     !selectedVersionId ||
                     isBothEnvironment ||
-                    Boolean(isCurseForgeModUnknown && !selectedEnvironmentOverride)
+                    Boolean(isModEnvironmentUnknown && !selectedEnvironmentOverride)
                       ? "not-allowed"
                       : "pointer",
                 }}
@@ -1668,7 +1683,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                       resolvingPlan ||
                       !releasePlan ||
                       !releasePlan.isValid ||
-                      Boolean(isCurseForgeModUnknown && !selectedEnvironmentOverride)
+                      Boolean(isModEnvironmentUnknown && !selectedEnvironmentOverride)
                     }
                     className="launcher-btn-secondary"
                     style={{
@@ -1693,7 +1708,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                     resolvingPlan ||
                     !releasePlan ||
                     !releasePlan.isValid ||
-                    Boolean(isCurseForgeModUnknown && !selectedEnvironmentOverride)
+                    Boolean(isModEnvironmentUnknown && !selectedEnvironmentOverride)
                   }
                   className="launcher-btn-primary"
                   style={{
@@ -1708,7 +1723,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                       resolvingPlan ||
                       !releasePlan ||
                       !releasePlan.isValid ||
-                      Boolean(isCurseForgeModUnknown && !selectedEnvironmentOverride)
+                      Boolean(isModEnvironmentUnknown && !selectedEnvironmentOverride)
                         ? 0.5
                         : 1,
                     cursor:
@@ -1717,7 +1732,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                       resolvingPlan ||
                       !releasePlan ||
                       !releasePlan.isValid ||
-                      Boolean(isCurseForgeModUnknown && !selectedEnvironmentOverride)
+                      Boolean(isModEnvironmentUnknown && !selectedEnvironmentOverride)
                         ? "not-allowed"
                         : "pointer",
                   }}

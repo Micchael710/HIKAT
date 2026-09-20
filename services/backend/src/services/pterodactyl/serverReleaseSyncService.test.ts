@@ -1939,4 +1939,305 @@ describe("Mandatory Regression Tests: Release Sync Scoping & Self-Heal (A-G)", (
       expect(currentContent.releaseId).toBe(published.id)
     })
   })
+
+  // Shard 08E: Server Release Sync Environment handling (CLIENT, BOTH, SERVER)
+  describe("Shard 08E: Server Release Sync Environment handling (CLIENT, BOTH, SERVER)", () => {
+    async function createValidJar(bytes: number[] = [0x50, 0x4b, 0x03, 0x04, 0x10, 0x20, 0x30]) {
+      const u8 = new Uint8Array(bytes)
+      const hashBuffer = await crypto.subtle.digest("SHA-256", u8)
+      const sha256 = Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+      return { bytes: u8, sha256 }
+    }
+
+    it("excludes CLIENT mods from sync plan, includes BOTH and SERVER, and sets correct environment in serverManagedContent", async () => {
+      const nowIso = new Date().toISOString()
+      const jarBoth = await createValidJar([0x50, 0x4b, 0x03, 0x04, 0x01, 0x02])
+      const jarServer = await createValidJar([0x50, 0x4b, 0x03, 0x04, 0x03, 0x04])
+      const jarClient = await createValidJar([0x50, 0x4b, 0x03, 0x04, 0x05, 0x06])
+
+      await db.insert(schema.gameReleases).values({
+        id: "rel-env-1",
+        version: "1.0.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        status: "PUBLISHED",
+        publishedAt: nowIso,
+        createdBy: "admin-1",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      })
+
+      await db.insert(schema.gameReleaseFiles).values([
+        {
+          id: "grf-client-1",
+          releaseId: "rel-env-1",
+          name: "client-only.jar",
+          logicalPath: "mods/client-only.jar",
+          category: "MOD",
+          sha256: jarClient.sha256,
+          sizeBytes: jarClient.bytes.length,
+          policy: "NO_MODIFICABLE",
+          effectivePolicy: "NO_MODIFICABLE",
+          isDirectory: false,
+          sourceEnvironment: "CLIENT",
+          objectKey: "releases/rel-env-1/mods/client-only.jar",
+          createdAt: nowIso,
+        },
+        {
+          id: "grf-both-1",
+          releaseId: "rel-env-1",
+          name: "both-mod.jar",
+          logicalPath: "mods/both-mod.jar",
+          category: "MOD",
+          sha256: jarBoth.sha256,
+          sizeBytes: jarBoth.bytes.length,
+          policy: "NO_MODIFICABLE",
+          effectivePolicy: "NO_MODIFICABLE",
+          isDirectory: false,
+          sourceEnvironment: "BOTH",
+          objectKey: "releases/rel-env-1/mods/both-mod.jar",
+          createdAt: nowIso,
+        },
+        {
+          id: "grf-server-1",
+          releaseId: "rel-env-1",
+          name: "server-mod.jar",
+          logicalPath: "mods/server-mod.jar",
+          category: "MOD",
+          sha256: jarServer.sha256,
+          sizeBytes: jarServer.bytes.length,
+          policy: "NO_MODIFICABLE",
+          effectivePolicy: "NO_MODIFICABLE",
+          isDirectory: false,
+          sourceEnvironment: "SERVER",
+          objectKey: "releases/rel-env-1/mods/server-mod.jar",
+          createdAt: nowIso,
+        },
+      ])
+
+      env.ASSETS.get = vi.fn().mockImplementation(async (key: string) => {
+        if (key.includes("both-mod.jar")) {
+          return { arrayBuffer: async () => jarBoth.bytes.buffer }
+        }
+        if (key.includes("server-mod.jar")) {
+          return { arrayBuffer: async () => jarServer.bytes.buffer }
+        }
+        return null
+      })
+
+      const writeFileSpy = vi.fn().mockResolvedValue(undefined)
+      const mockClient = {
+        getServerResources: vi.fn().mockResolvedValue({
+          attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+        }),
+        getServerDetails: vi.fn().mockResolvedValue({
+          attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+        }),
+        createFolder: vi.fn().mockResolvedValue(undefined),
+        writeFile: writeFileSpy,
+        deleteFiles: vi.fn().mockResolvedValue(undefined),
+        listDirectory: vi.fn().mockResolvedValue({ data: [] }),
+      }
+
+      const plan = await getServerReleaseSyncPlan(db, env, mockClient as any)
+      expect(plan.isPending).toBe(true)
+      expect(plan.summary.toInstall).toBe(2)
+      expect(plan.items.find((i) => i.filename === "client-only.jar")).toBeUndefined()
+      expect(plan.items.find((i) => i.filename === "both-mod.jar")?.action).toBe("INSTALL")
+      expect(plan.items.find((i) => i.filename === "server-mod.jar")?.action).toBe("INSTALL")
+
+      const applyRes = await applyServerReleaseSync(db, env, "admin-1", false, mockClient as any)
+      expect(applyRes.success).toBe(true)
+      expect(applyRes.syncedCount).toBe(2)
+
+      const records = await db.select().from(schema.serverManagedContent)
+      expect(records).toHaveLength(2)
+      const bothRecord = records.find((r: any) => r.targetPath === "mods/both-mod.jar")
+      const serverRecord = records.find((r: any) => r.targetPath === "mods/server-mod.jar")
+      expect(bothRecord?.environment).toBe("BOTH")
+      expect(serverRecord?.environment).toBe("SERVER")
+
+      const syncLogs = await db.select().from(schema.serverReleaseSyncs)
+      const lastLog = syncLogs[syncLogs.length - 1]
+      const details = JSON.parse(lastLog.details)
+      expect(details.toInstall).toBe(2)
+    })
+
+    it("detects BOTH -> SERVER transition with same hash/path as UPDATE and applies it without re-writing binary", async () => {
+      const nowIso = new Date().toISOString()
+      const jar = await createValidJar([0x50, 0x4b, 0x03, 0x04, 0x11, 0x22])
+
+      await db.insert(schema.gameReleases).values({
+        id: "rel-env-2",
+        version: "1.1.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        status: "PUBLISHED",
+        publishedAt: nowIso,
+        createdBy: "admin-1",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      })
+
+      // Desired file in release has sourceEnvironment = SERVER
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "grf-trans-1",
+        releaseId: "rel-env-2",
+        name: "tool.jar",
+        logicalPath: "mods/tool.jar",
+        category: "MOD",
+        sha256: jar.sha256,
+        sizeBytes: jar.bytes.length,
+        policy: "NO_MODIFICABLE",
+        effectivePolicy: "NO_MODIFICABLE",
+        isDirectory: false,
+        sourceEnvironment: "SERVER",
+        objectKey: "releases/rel-env-2/mods/tool.jar",
+        createdAt: nowIso,
+      })
+
+      // Existing record in D1 has environment = BOTH with identical sha256 and targetPath
+      await db.insert(schema.serverManagedContent).values({
+        id: "smc-trans-1",
+        managementSource: "GAME_RELEASE",
+        targetPath: "mods/tool.jar",
+        sha256: jar.sha256,
+        sizeBytes: jar.bytes.length,
+        name: "tool.jar",
+        contentType: "MOD",
+        environment: "BOTH",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      })
+
+      const writeFileSpy = vi.fn().mockResolvedValue(undefined)
+      const mockClient = {
+        getServerResources: vi.fn().mockResolvedValue({
+          attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+        }),
+        getServerDetails: vi.fn().mockResolvedValue({
+          attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+        }),
+        createFolder: vi.fn().mockResolvedValue(undefined),
+        writeFile: writeFileSpy,
+        deleteFiles: vi.fn().mockResolvedValue(undefined),
+        // File physically exists on Wings
+        listDirectory: vi.fn().mockResolvedValue({
+          data: [{ attributes: { name: "tool.jar", is_file: true } }],
+        }),
+      }
+
+      // 1. Plan must report UPDATE because environment differs
+      const plan = await getServerReleaseSyncPlan(db, env, mockClient as any)
+      expect(plan.isPending).toBe(true)
+      expect(plan.summary.toUpdate).toBe(1)
+      expect(plan.summary.toKeep).toBe(0)
+      const item = plan.items.find((i) => i.filename === "tool.jar")
+      expect(item?.action).toBe("UPDATE")
+
+      // 2. Apply must update D1 to SERVER and NOT re-write binary to Wings
+      const applyRes = await applyServerReleaseSync(db, env, "admin-1", false, mockClient as any)
+      expect(applyRes.success).toBe(true)
+      expect(applyRes.syncedCount).toBe(1)
+      expect(writeFileSpy).not.toHaveBeenCalledWith("/mods/tool.jar", expect.anything())
+
+      const record = await db.select().from(schema.serverManagedContent).where(eq(schema.serverManagedContent.id, "smc-trans-1")).get()
+      expect(record?.environment).toBe("SERVER")
+
+      const syncLogs = await db.select().from(schema.serverReleaseSyncs)
+      const lastLog = syncLogs[syncLogs.length - 1]
+      const details = JSON.parse(lastLog.details)
+      expect(details.toUpdate).toBe(1)
+    })
+
+    it("detects SERVER -> BOTH transition with same hash/path as UPDATE and applies it without re-writing binary", async () => {
+      const nowIso = new Date().toISOString()
+      const jar = await createValidJar([0x50, 0x4b, 0x03, 0x04, 0x33, 0x44])
+
+      await db.insert(schema.gameReleases).values({
+        id: "rel-env-3",
+        version: "1.2.0",
+        minecraftVersion: "1.21.1",
+        neoForgeVersion: "21.1.65",
+        status: "PUBLISHED",
+        publishedAt: nowIso,
+        createdBy: "admin-1",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      })
+
+      // Desired file in release has sourceEnvironment = BOTH
+      await db.insert(schema.gameReleaseFiles).values({
+        id: "grf-trans-2",
+        releaseId: "rel-env-3",
+        name: "helper.jar",
+        logicalPath: "mods/helper.jar",
+        category: "MOD",
+        sha256: jar.sha256,
+        sizeBytes: jar.bytes.length,
+        policy: "NO_MODIFICABLE",
+        effectivePolicy: "NO_MODIFICABLE",
+        isDirectory: false,
+        sourceEnvironment: "BOTH",
+        objectKey: "releases/rel-env-3/mods/helper.jar",
+        createdAt: nowIso,
+      })
+
+      // Existing record in D1 has environment = SERVER with identical sha256 and targetPath
+      await db.insert(schema.serverManagedContent).values({
+        id: "smc-trans-2",
+        managementSource: "GAME_RELEASE",
+        targetPath: "mods/helper.jar",
+        sha256: jar.sha256,
+        sizeBytes: jar.bytes.length,
+        name: "helper.jar",
+        contentType: "MOD",
+        environment: "SERVER",
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      })
+
+      const writeFileSpy = vi.fn().mockResolvedValue(undefined)
+      const mockClient = {
+        getServerResources: vi.fn().mockResolvedValue({
+          attributes: { current_state: "offline", resources: { memory_bytes: 0, cpu_absolute: 0, disk_bytes: 0, uptime: 0 } },
+        }),
+        getServerDetails: vi.fn().mockResolvedValue({
+          attributes: { limits: { memory: 1024, cpu: 100, disk: 10240 } },
+        }),
+        createFolder: vi.fn().mockResolvedValue(undefined),
+        writeFile: writeFileSpy,
+        deleteFiles: vi.fn().mockResolvedValue(undefined),
+        // File physically exists on Wings
+        listDirectory: vi.fn().mockResolvedValue({
+          data: [{ attributes: { name: "helper.jar", is_file: true } }],
+        }),
+      }
+
+      // 1. Plan must report UPDATE because environment differs
+      const plan = await getServerReleaseSyncPlan(db, env, mockClient as any)
+      expect(plan.isPending).toBe(true)
+      expect(plan.summary.toUpdate).toBe(1)
+      expect(plan.summary.toKeep).toBe(0)
+      const item = plan.items.find((i) => i.filename === "helper.jar")
+      expect(item?.action).toBe("UPDATE")
+
+      // 2. Apply must update D1 to BOTH and NOT re-write binary to Wings
+      const applyRes = await applyServerReleaseSync(db, env, "admin-1", false, mockClient as any)
+      expect(applyRes.success).toBe(true)
+      expect(applyRes.syncedCount).toBe(1)
+      expect(writeFileSpy).not.toHaveBeenCalledWith("/mods/helper.jar", expect.anything())
+
+      const record = await db.select().from(schema.serverManagedContent).where(eq(schema.serverManagedContent.id, "smc-trans-2")).get()
+      expect(record?.environment).toBe("BOTH")
+
+      const syncLogs = await db.select().from(schema.serverReleaseSyncs)
+      const lastLog = syncLogs[syncLogs.length - 1]
+      const details = JSON.parse(lastLog.details)
+      expect(details.toUpdate).toBe(1)
+    })
+  })
 })
+

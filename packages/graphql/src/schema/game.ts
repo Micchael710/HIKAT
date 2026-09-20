@@ -454,6 +454,7 @@ export const gameTypeDefs = /* GraphQL */ `
     installedFileId: String
     installedVersionNumber: String
     availableCompatibleVersions: [ModProjectVersion!]!
+    allVersions: [ModProjectVersion!]
   }
 
   """

@@ -540,7 +540,7 @@ export class ModProviderManager {
       if (environmentFilter) {
         return item.environment === environmentFilter
       }
-      return item.environment !== "SERVER"
+      return true
     }
 
     // Preserve legacy offset behavior ONLY when offset > 0, no cursor was passed, and no environmentFilter
@@ -1886,19 +1886,17 @@ export class ModProviderManager {
         : null
 
     let rootEnv: ModEnvironmentGql | null = knownRootEnv
-    if (contentType === "MOD") {
-      if (input.provider === "CURSEFORGE" && !isKnownEnvironment(rootEnv)) {
-        if (
-          input.environmentOverride === "CLIENT" ||
-          input.environmentOverride === "BOTH" ||
-          input.environmentOverride === "SERVER"
-        ) {
-          rootEnv = input.environmentOverride
-        } else if (!input.environmentOverride) {
-          conflicts.push(
-            "Se requiere especificar el entorno de ejecución (Solo cliente, Cliente y servidor, o Solo servidor) para este mod de CurseForge.",
-          )
-        }
+    if (contentType === "MOD" && !isKnownEnvironment(rootEnv)) {
+      if (
+        input.environmentOverride === "CLIENT" ||
+        input.environmentOverride === "BOTH" ||
+        input.environmentOverride === "SERVER"
+      ) {
+        rootEnv = input.environmentOverride
+      } else if (!input.environmentOverride) {
+        conflicts.push(
+          "Se requiere especificar el entorno de ejecución (Solo cliente, Cliente y servidor, o Solo servidor) para este mod.",
+        )
       }
     }
 
@@ -2007,7 +2005,20 @@ export class ModProviderManager {
           }
         }
 
-        if (!depProjectId) continue
+        if (!depProjectId) {
+          const reason = `No se pudo determinar el proyecto correspondiente a la versión/archivo dependiente "${pinnedId || "desconocido"}".`
+          warnings.push(reason)
+          unresolvedDependencies.push({
+            provider: current.provider,
+            projectId: null,
+            versionId: pinnedId ? String(pinnedId) : null,
+            projectName: dep.projectName || null,
+            contentType: null,
+            reason,
+            allVersions: [],
+          })
+          continue
+        }
 
         // 2. Determine target contentType for the dependency without assuming MOD:
         let depContentType: ContentTypeGql | null = null
@@ -2060,15 +2071,39 @@ export class ModProviderManager {
             if (candidateTypes.length === 1) {
               depContentType = candidateTypes[0]!
             } else {
-              conflicts.push(
-                `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" es de tipo indeterminable o ambigua (tipos compatibles posibles: ${candidateTypes.join(", ")}).`,
-              )
+              const reason = `La versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" es de tipo indeterminable o ambigua (tipos compatibles posibles: ${candidateTypes.join(", ")}).`
+              warnings.push(reason)
+              let allVers: NormalizedModVersion[] = []
+              if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+                allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
+              }
+              unresolvedDependencies.push({
+                provider: current.provider,
+                projectId: depProjectId,
+                versionId: pinnedId ? String(pinnedId) : null,
+                projectName: dep.projectName || null,
+                contentType: null,
+                reason,
+                allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
+              })
               continue
             }
           } else {
-            conflicts.push(
-              `Conflicto: no se pudo determinar el tipo de contenido para la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}".`,
-            )
+            const reason = `No se pudo determinar el tipo de contenido para la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}".`
+            warnings.push(reason)
+            let allVers: NormalizedModVersion[] = []
+            if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+              allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
+            }
+            unresolvedDependencies.push({
+              provider: current.provider,
+              projectId: depProjectId,
+              versionId: pinnedId ? String(pinnedId) : null,
+              projectName: dep.projectName || null,
+              contentType: null,
+              reason,
+              allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
+            })
             continue
           }
         } else {
@@ -2076,22 +2111,54 @@ export class ModProviderManager {
           if (supportedTypes.length === 1) {
             depContentType = supportedTypes[0]!
           } else if (supportedTypes.length > 1) {
-            conflicts.push(
-              `Conflicto: la dependencia "${dep.projectName || depProjectId}" es multi-tipo y ambigua (soporta ${supportedTypes.join(", ")}); se requiere especificar versión o resolver manualmente.`,
-            )
+            const reason = `La dependencia "${dep.projectName || depProjectId}" es multi-tipo y ambigua (soporta ${supportedTypes.join(", ")}); se requiere especificar versión o resolver manualmente.`
+            warnings.push(reason)
+            let allVers: NormalizedModVersion[] = []
+            if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+              allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
+            }
+            unresolvedDependencies.push({
+              provider: current.provider,
+              projectId: depProjectId,
+              versionId: null,
+              projectName: dep.projectName || null,
+              contentType: null,
+              reason,
+              allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
+            })
             continue
           } else {
-            conflicts.push(
-              `Conflicto: la dependencia "${dep.projectName || depProjectId}" tiene un tipo de contenido desconocido o no soportado.`,
-            )
+            const reason = `La dependencia "${dep.projectName || depProjectId}" tiene un tipo de contenido desconocido o no soportado.`
+            warnings.push(reason)
+            let allVers: NormalizedModVersion[] = []
+            if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+              allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
+            }
+            unresolvedDependencies.push({
+              provider: current.provider,
+              projectId: depProjectId,
+              versionId: null,
+              projectName: dep.projectName || null,
+              contentType: null,
+              reason,
+              allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
+            })
             continue
           }
         }
 
         if (depContentType === "DATA_PACK") {
-          conflicts.push(
-            `Conflicto: la dependencia "${dep.projectName || depProjectId}" es un Data Pack y debe administrarse desde Servidor → Archivos.`,
-          )
+          const reason = `La dependencia "${dep.projectName || depProjectId}" es un Data Pack y debe administrarse desde Servidor → Archivos.`
+          warnings.push(reason)
+          unresolvedDependencies.push({
+            provider: current.provider,
+            projectId: depProjectId,
+            versionId: pinnedId ? String(pinnedId) : null,
+            projectName: dep.projectName || null,
+            contentType: "DATA_PACK",
+            reason,
+            allVersions: [],
+          })
           continue
         }
 
@@ -2295,7 +2362,7 @@ export class ModProviderManager {
             : null
 
         let depEnv: ModEnvironmentGql | null = knownDepEnv
-        if (input.provider === "CURSEFORGE" && depContentType === "MOD" && !isKnownEnvironment(depEnv)) {
+        if (depContentType === "MOD" && !isKnownEnvironment(depEnv)) {
           depEnv = isKnownEnvironment(rootEnv) ? rootEnv : null
         }
 
@@ -2329,6 +2396,13 @@ export class ModProviderManager {
           }
         }
 
+        let allVersionsForDep: NormalizedModVersion[] | null = null
+        if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+          allVersionsForDep = await depAdapter
+            .getProjectVersions(env, depProjectId, finalDepContentType)
+            .catch(() => null)
+        }
+
         itemsMap.set(depKey, {
           provider: current.provider,
           projectId: depProjectId,
@@ -2350,6 +2424,7 @@ export class ModProviderManager {
           installedFileId: depInstalledFileId,
           installedVersionNumber: depInstalledVersionNumber,
           availableCompatibleVersions: depCompatibleVersions as any,
+          allVersions: allVersionsForDep && allVersionsForDep.length > 0 ? (allVersionsForDep as any) : null,
         })
 
         // Enqueue to resolve transitive dependencies

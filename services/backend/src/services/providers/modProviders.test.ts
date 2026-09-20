@@ -974,9 +974,10 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         { provider: "CURSEFORGE", projectId: "328085", versionId: "1111", contentType: "MOD", environmentOverride: "CLIENT" },
       )
 
-      expect(plan.isValid).toBe(false)
-      expect(plan.conflicts.length).toBe(1)
-      expect(plan.conflicts[0]).toContain("tipo de contenido desconocido")
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts.length).toBe(0)
+      expect(plan.warnings.some((w) => w.includes("tipo de contenido desconocido"))).toBe(true)
+      expect(plan.unresolvedDependencies.some((u) => u.reason.includes("tipo de contenido desconocido"))).toBe(true)
     })
 
     it("ensures CurseForge API key is NEVER sent to external binary CDN download URLs", async () => {
@@ -2538,11 +2539,13 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         { provider: "MODRINTH", projectId: "root-with-pinned", versionId: "ver-root-pin", contentType: "MOD" },
       )
 
-      expect(plan.isValid).toBe(false)
-      expect(plan.conflicts.some((c) => c.includes("Data Pack") && c.includes("Servidor → Archivos"))).toBe(true)
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts.length).toBe(0)
+      expect(plan.warnings.some((c) => c.includes("Data Pack") && c.includes("Servidor → Archivos"))).toBe(true)
+      expect(plan.unresolvedDependencies.some((u) => u.contentType === "DATA_PACK")).toBe(true)
     })
 
-    it("flags conflict for ambiguous multi-type dependency without silently guessing MOD", async () => {
+    it("flags warning and unresolvedDependency for ambiguous multi-type dependency without silently guessing MOD", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
         if (u.includes("/project/root-with-ambig/version")) {
@@ -2586,9 +2589,10 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         { provider: "MODRINTH", projectId: "root-with-ambig", versionId: "ver-root-ambig", contentType: "MOD" },
       )
 
-      expect(plan.isValid).toBe(false)
-      expect(plan.conflicts.length).toBe(1)
-      expect(plan.conflicts[0]).toContain("es multi-tipo y ambigua")
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts.length).toBe(0)
+      expect(plan.warnings.some((w) => w.includes("es multi-tipo y ambigua"))).toBe(true)
+      expect(plan.unresolvedDependencies.some((u) => u.reason.includes("es multi-tipo y ambigua"))).toBe(true)
     })
 
     it("resolves pinned RESOURCE_PACK with loader minecraft into resourcepacks/", async () => {
@@ -2795,9 +2799,10 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         { provider: "MODRINTH", projectId: "root-with-indet", versionId: "ver-root-indet", contentType: "MOD" },
       )
 
-      expect(plan.isValid).toBe(false)
-      expect(plan.conflicts.length).toBe(1)
-      expect(plan.conflicts[0]).toContain("no se pudo determinar el tipo de contenido")
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts.length).toBe(0)
+      expect(plan.warnings.some((w) => w.toLowerCase().includes("no se pudo determinar el tipo de contenido"))).toBe(true)
+      expect(plan.unresolvedDependencies.some((u) => u.reason.toLowerCase().includes("no se pudo determinar el tipo de contenido"))).toBe(true)
     })
   })
 
@@ -2878,8 +2883,10 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         versionId: "v-root",
         contentType: "MOD",
       })
-      expect(plan.isValid).toBe(false)
-      expect(plan.conflicts[0]).toContain("es multi-tipo y ambigua")
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts.length).toBe(0)
+      expect(plan.warnings.some((w) => w.includes("es multi-tipo y ambigua"))).toBe(true)
+      expect(plan.unresolvedDependencies.some((u) => u.reason.includes("es multi-tipo y ambigua"))).toBe(true)
     })
 
     it("3. determines RESOURCE_PACK for resourcepack project without all_project_types and loader minecraft", async () => {
@@ -5960,6 +5967,188 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(allVersions.length).toBe(65)
       expect(allVersions[0]?.id).toBe("1000")
       expect(allVersions[64]?.id).toBe("1064")
+    })
+
+    it("resolveInstallationPlan applies environmentOverride to MODRINTH root when environment is UNKNOWN/null", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/mr-unknown-env/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-mr-unknown",
+                name: "MR Unknown Env Version",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "mr-unknown.jar", size: 1000, url: "https://cdn/mr-unknown.jar" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/mr-unknown-env")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "mr-unknown-env",
+              title: "MR Unknown Env Project",
+              project_type: "mod",
+              client_side: "unknown",
+              server_side: "unknown",
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      // Without environmentOverride, flags conflict
+      const planNoOverride = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "mr-unknown-env",
+        versionId: "v-mr-unknown",
+        contentType: "MOD",
+      })
+      expect(planNoOverride.isValid).toBe(false)
+      expect(planNoOverride.conflicts.some((c) => c.includes("Se requiere especificar el entorno de ejecución"))).toBe(true)
+
+      // With environmentOverride = SERVER, plan is valid and item has environment = SERVER
+      const planWithOverride = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "mr-unknown-env",
+        versionId: "v-mr-unknown",
+        contentType: "MOD",
+        environmentOverride: "SERVER",
+      })
+      expect(planWithOverride.isValid).toBe(true)
+      expect(planWithOverride.conflicts).toHaveLength(0)
+      const rootItem = planWithOverride.items.find((i) => i.projectId === "mr-unknown-env")
+      expect(rootItem?.environment).toBe("SERVER")
+    })
+
+    it("resolveInstallationPlan adds unresolvedDependency with null projectId when dep has versionId but projectId cannot be resolved", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-with-orphan-dep/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-root-orphan",
+                name: "Root With Orphan Dep",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root-orphan.jar", size: 1000, url: "https://cdn/root-orphan.jar" }],
+                // Pinned version without project_id
+                dependencies: [{ version_id: "unresolvable-ver-id", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-with-orphan-dep")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "root-with-orphan-dep",
+              title: "Root With Orphan Dep",
+              project_type: "mod",
+              client_side: "required",
+              server_side: "required",
+            }),
+          }
+        }
+        // Querying version returns 404 (or no projectId)
+        if (u.includes("/version/unresolvable-ver-id")) {
+          return { ok: false, status: 404 }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-with-orphan-dep",
+        versionId: "v-root-orphan",
+        contentType: "MOD",
+      })
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts).toHaveLength(0)
+      expect(plan.warnings.some((w) => w.includes("No se pudo determinar el proyecto"))).toBe(true)
+      expect(plan.unresolvedDependencies.length).toBe(1)
+      const unres = plan.unresolvedDependencies[0]!
+      expect(unres.projectId).toBeNull()
+      expect(unres.versionId).toBe("unresolvable-ver-id")
+      expect(unres.contentType).toBeNull()
+      expect(unres.reason).toContain("No se pudo determinar el proyecto")
+    })
+
+    it("installModPlan throws fail-safe error if any MOD arrives at installation with null or UNKNOWN environment", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/mod-with-unknown-env/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-unknown",
+                name: "Unknown Env Version",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "mod-unknown.jar", size: 1000, url: "https://cdn/mod-unknown.jar" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/mod-with-unknown-env")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "mod-with-unknown-env",
+              title: "Mod Unknown Env",
+              project_type: "mod",
+              client_side: "unknown",
+              server_side: "unknown",
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const draft = await db.select().from(schema.gameReleases).where(eq(schema.gameReleases.status, "DRAFT")).get()
+      if (!draft) {
+        const nowIso = new Date().toISOString()
+        await db.insert(schema.gameReleases).values({
+          id: "draft-install-test",
+          version: "1.0.0-draft",
+          minecraftVersion: "1.21.1",
+          neoForgeVersion: "21.1.65",
+          status: "DRAFT",
+          createdBy: adminUserId,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        })
+      }
+
+      await expect(
+        installModPlan(
+          db,
+          env,
+          {
+            provider: "MODRINTH",
+            projectId: "mod-with-unknown-env",
+            versionId: "v-unknown",
+            contentType: "MOD",
+          },
+          adminUserId,
+        ),
+      ).rejects.toThrow(/Se requiere especificar el entorno de ejecución \(Solo cliente, Cliente y servidor, o Solo servidor\)/)
     })
   })
 })

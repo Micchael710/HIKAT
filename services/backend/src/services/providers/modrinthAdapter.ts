@@ -46,9 +46,11 @@ function mapModrinthProjectTypeToContentType(
 function mapModrinthEnvironment(clientSide?: string, serverSide?: string): ModEnvironmentGql {
   const client = clientSide?.toLowerCase()
   const server = serverSide?.toLowerCase()
+  if (client === "unknown" || server === "unknown") return "UNKNOWN"
   if (client === "unsupported" && server && server !== "unsupported") return "SERVER"
   if (server === "unsupported" && client && client !== "unsupported") return "CLIENT"
   if (client && client !== "unsupported" && server && server !== "unsupported") return "BOTH"
+  if (!client && !server) return "BOTH"
   return "UNKNOWN"
 }
 

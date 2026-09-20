@@ -485,6 +485,7 @@ export interface ModInstallationPlanItem {
   installedFileId?: string | null
   installedVersionNumber?: string | null
   availableCompatibleVersions: ModProjectVersion[]
+  allVersions?: ModProjectVersion[] | null
 }
 
 export interface ModPlanUnresolvedDependency {

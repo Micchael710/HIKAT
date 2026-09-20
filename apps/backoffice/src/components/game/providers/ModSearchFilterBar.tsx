@@ -222,6 +222,7 @@ export const ModSearchFilterBar: React.FC<ModSearchFilterBarProps> = ({
                 <>
                   <option value="CLIENT">Solo cliente</option>
                   <option value="BOTH">Cliente y servidor</option>
+                  <option value="SERVER">Solo servidor</option>
                 </>
               )}
             </select>

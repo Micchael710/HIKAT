@@ -2608,6 +2608,19 @@ export const modProvidersApi = {
               filename
               sizeBytes
             }
+            allVersions {
+              id
+              fileId
+              versionNumber
+              name
+              releaseType
+              gameVersions
+              loaders
+              publishedAt
+              downloads
+              filename
+              sizeBytes
+            }
           }
           totalDownloadSizeBytes
           conflicts

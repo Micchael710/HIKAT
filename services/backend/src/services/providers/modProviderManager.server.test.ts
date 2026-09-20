@@ -507,8 +507,8 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     expect(results.items.map((i) => i.projectId)).toEqual(["srv-mod-1", "both-mod-1", "srv-mod-2"])
   })
 
-  // Test 8: searchMods excludes SERVER mods in Game Updates flow
-  it("searchMods excludes SERVER mods in Game Updates flow", async () => {
+  // Test 8: searchMods includes SERVER mods in Game Updates flow
+  it("searchMods includes SERVER mods in Game Updates flow and supports finding them", async () => {
     const mockProjects = [
       { projectId: "srv-mod-1", name: "Chunky", environment: "SERVER", contentType: "MOD" },
       { projectId: "client-mod-1", name: "Sodium", environment: "CLIENT", contentType: "MOD" },
@@ -536,8 +536,8 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
       "MOD",
     )
 
-    expect(results.items).toHaveLength(2)
-    expect(results.items.map((i) => i.projectId)).toEqual(["client-mod-1", "both-mod-1"])
+    expect(results.items).toHaveLength(3)
+    expect(results.items.map((i) => i.projectId)).toEqual(["srv-mod-1", "client-mod-1", "both-mod-1"])
   })
 
   // Test 9: Filtered pagination fetches through chunks and returns items with accurate hasMore
@@ -1389,7 +1389,24 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     expect(bothOnlyRes.items.every((i) => i.environment === "BOTH")).toBe(true)
     expect(bothOnlyRes.items.map((i) => i.projectId)).toEqual(["mr-both-1"])
 
-    // 3. No filter: returns CLIENT and BOTH (excludes SERVER)
+    // 3. Filter SERVER: returns only SERVER, excludes CLIENT and BOTH
+    const serverOnlyRes = await manager.searchMods(
+      mockEnv,
+      db,
+      "",
+      "MODRINTH",
+      10,
+      0,
+      "MOD",
+      null,
+      null,
+      null,
+      "SERVER",
+    )
+    expect(serverOnlyRes.items.every((i) => i.environment === "SERVER")).toBe(true)
+    expect(serverOnlyRes.items.map((i) => i.projectId)).toEqual(["mr-server-1"])
+
+    // 4. No filter: returns CLIENT, BOTH, and SERVER
     const noFilterRes = await manager.searchMods(
       mockEnv,
       db,
@@ -1406,6 +1423,7 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
     expect(noFilterRes.items.map((i) => i.projectId)).toEqual([
       "mr-client-1",
       "mr-both-1",
+      "mr-server-1",
       "mr-client-2",
     ])
   })

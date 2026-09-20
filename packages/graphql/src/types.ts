@@ -1000,6 +1000,7 @@ export interface ModInstallationPlanItemGql {
   installedFileId?: string | null
   installedVersionNumber?: string | null
   availableCompatibleVersions: ModProjectVersionGql[]
+  allVersions?: ModProjectVersionGql[] | null
 }
 
 export interface ModPlanUnresolvedDependencyGql {

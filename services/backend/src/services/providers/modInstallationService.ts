@@ -648,11 +648,10 @@ export async function installModPlansBatch(
   for (const item of deduplicatedItems) {
     if (
       item.contentType === "MOD" &&
-      item.provider === "CURSEFORGE" &&
       (!item.environment || item.environment === "UNKNOWN")
     ) {
       throw createGraphQLError(
-        `Se requiere especificar el entorno de ejecución (Solo cliente o Cliente y servidor) para "${item.projectName}".`,
+        `Se requiere especificar el entorno de ejecución (Solo cliente, Cliente y servidor, o Solo servidor) para "${item.projectName}".`,
         "VALIDATION_ERROR",
       )
     }

@@ -465,7 +465,13 @@ export async function hasServerRelevantChanges(
     if (!matched) {
       return true // New mod to install on server
     }
-    if (matched.sha256 !== desired.sha256 || matched.targetPath !== `mods/${desired.name}`) {
+    const desiredEnvironment = desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH"
+    const currentEnv = matched.environment || "BOTH"
+    if (
+      matched.sha256 !== desired.sha256 ||
+      matched.targetPath !== `mods/${desired.name}` ||
+      currentEnv !== desiredEnvironment
+    ) {
       return true // Mod updated on server
     }
   }

@@ -183,9 +183,12 @@ export async function getServerReleaseSyncPlan(
     } else {
       matchedCurrentIds.add(matchedCurrent.id)
       const currentFileName = matchedCurrent.targetPath.split("/").pop() || matchedCurrent.targetPath
+      const desiredEnvironment = desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH"
+      const currentEnv = matchedCurrent.environment || "BOTH"
       const isIdentical =
         matchedCurrent.sha256 === desired.sha256 &&
-        matchedCurrent.targetPath === `mods/${desired.name}`
+        matchedCurrent.targetPath === `mods/${desired.name}` &&
+        currentEnv === desiredEnvironment
 
       if (isIdentical) {
         if (!physicalFilesAvailable || physicalExists) {
@@ -734,6 +737,25 @@ export async function applyServerReleaseSync(
           matchedCurrent.targetPath === `mods/${desired.name}`
 
         if (isIdentical && physicalMods.has(desired.name)) {
+          const desiredEnvironment = desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH"
+          const currentEnv = matchedCurrent.environment || "BOTH"
+          if (currentEnv !== desiredEnvironment) {
+            await db
+              .update(schema.serverManagedContent)
+              .set({
+                environment: desiredEnvironment,
+                gameReleaseFileId: desired.id,
+                provider: desired.sourceProvider || matchedCurrent.provider || null,
+                projectId: desired.sourceProjectId || matchedCurrent.projectId || null,
+                versionId: desired.sourceVersionId || matchedCurrent.versionId || null,
+                fileId: desired.sourceFileId || matchedCurrent.fileId || null,
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(schema.serverManagedContent.id, matchedCurrent.id))
+            updatedCount++
+            continue
+          }
+
           keptCount++
           continue
         }

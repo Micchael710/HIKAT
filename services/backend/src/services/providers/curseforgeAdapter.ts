@@ -424,11 +424,9 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     let index = 0
     let totalCount = Infinity
     const versions: NormalizedModVersion[] = []
-    const maxPages = 20
-    let pagesFetched = 0
 
-    while (index < totalCount && pagesFetched < maxPages) {
-      pagesFetched++
+    while (index < totalCount) {
+      const prevIndex = index
       const params = new URLSearchParams({
         index: String(index),
         pageSize: String(pageSize),
@@ -464,7 +462,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
         }
 
         for (const file of files) {
-          const v = await this.mapCurseForgeFile(env, projectId, file, "", contentType)
+          const v = await this.mapCurseForgeFile(env, projectId, file, "", contentType, false)
           versions.push(v)
         }
 
@@ -473,6 +471,9 @@ export class CurseForgeAdapter implements ModProviderAdapter {
         }
 
         index += files.length
+        if (index <= prevIndex || files.length < pageSize) {
+          break
+        }
       } catch {
         break
       } finally {
@@ -514,7 +515,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       const data = (await res.json()) as { data: any }
       if (!data.data) return null
 
-      return await this.mapCurseForgeFile(env, projectId, data.data, "", contentType)
+      return await this.mapCurseForgeFile(env, projectId, data.data, "", contentType, true)
     } finally {
       clearTimeout(timeoutId)
     }
@@ -526,11 +527,12 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     file: any,
     defaultMc: string,
     contentType: ContentTypeGql = "MOD",
+    resolveDownloadUrl: boolean = true,
   ): Promise<NormalizedModVersion> {
     let downloadUrl = file.downloadUrl || ""
 
-    // If downloadUrl is missing in the file object, query official CurseForge endpoint for download URL
-    if (!downloadUrl && projectId && file.id) {
+    // If downloadUrl is missing in the file object and resolveDownloadUrl is true, query official CurseForge endpoint for download URL
+    if (resolveDownloadUrl && !downloadUrl && projectId && file.id) {
       try {
         const baseUrl = this.getBaseUrl(env)
         const dlRes = await fetch(
