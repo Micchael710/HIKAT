@@ -157,18 +157,20 @@ body {
 
 /* Glass & Card Surfaces */
 .hikat-glass-card {
+  --card-translate-y: 0px;
   background: rgba(18, 26, 34, 0.75);
   border: 1.5px solid rgba(255, 255, 255, 0.09);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-radius: var(--hikat-radius-lg);
   box-shadow: var(--hikat-shadow-card);
+  transform: translateY(var(--card-translate-y, 0px));
   transition: border-color 0.22s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease;
 }
 
 .hikat-glass-card-interactive:hover {
+  --card-translate-y: -4px;
   border-color: rgba(255, 255, 255, 0.24);
-  transform: translateY(-4px);
   box-shadow: 0 16px 42px rgba(0, 0, 0, 0.55), 0 0 20px rgba(255, 255, 255, 0.03);
 }
 
@@ -231,7 +233,7 @@ body {
 /* Subtle Glass Micro-tilt */
 @media (hover: hover) and (pointer: fine) {
   .has-micro-tilt {
-    transform: perspective(1000px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+    transform: perspective(1000px) translateY(var(--card-translate-y, 0px)) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
     will-change: transform;
     transform-style: preserve-3d;
   }
@@ -262,7 +264,9 @@ body {
     transform: none !important;
     transition: none !important;
   }
-  .has-micro-tilt {
+  .has-micro-tilt,
+  .hikat-glass-card,
+  .hikat-glass-card-interactive:hover {
     transform: none !important;
   }
   .card-spotlight-layer,

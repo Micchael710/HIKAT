@@ -92,7 +92,7 @@ export const NewsSection: React.FC<NewsSectionProps> = ({ content }) => {
               ))
             ) : (
               <div className="py-8 text-center text-[#657788] text-xs">
-                {content.emptyMessage || "No hay novedades disponibles."}
+                {content.emptyMessage}
               </div>
             )}
           </div>

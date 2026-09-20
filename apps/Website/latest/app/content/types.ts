@@ -85,7 +85,7 @@ export interface NewsSectionContent {
     href: string;
   };
   items: NewsItem[];
-  emptyMessage?: string;
+  emptyMessage: string;
 }
 
 export interface CommunityBenefit {

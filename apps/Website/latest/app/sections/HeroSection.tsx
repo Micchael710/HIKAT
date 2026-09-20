@@ -99,6 +99,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
     let currentMouseX = 0;
     let currentMouseY = 0;
     let isRunning = false;
+    let isHeroVisible = true;
 
     const render = () => {
       if (!bgRef.current) {
@@ -142,14 +143,13 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
     };
 
     const handleScroll = () => {
+      if (!isHeroVisible) return;
       scrollY = window.scrollY || window.pageYOffset;
-      if (scrollY < 1200) {
-        startLoop();
-      }
+      startLoop();
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (!canHover) return;
+      if (!canHover || !isHeroVisible) return;
       const section = sectionRef.current;
       if (!section) return;
 
@@ -170,15 +170,34 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
       startLoop();
     };
 
+    let observer: IntersectionObserver | null = null;
+    const sectionEl = sectionRef.current;
+
+    if ("IntersectionObserver" in window && sectionEl) {
+      observer = new IntersectionObserver(
+        ([entry]) => {
+          isHeroVisible = entry.isIntersecting;
+          if (isHeroVisible) {
+            scrollY = window.scrollY || window.pageYOffset;
+            startLoop();
+          }
+        },
+        { threshold: 0 }
+      );
+      observer.observe(sectionEl);
+    }
+
     window.addEventListener("scroll", handleScroll, { passive: true });
 
-    const sectionEl = sectionRef.current;
     if (sectionEl && canHover) {
       sectionEl.addEventListener("mousemove", handleMouseMove, { passive: true });
       sectionEl.addEventListener("mouseleave", handleMouseLeave, { passive: true });
     }
 
     return () => {
+      if (observer) {
+        observer.disconnect();
+      }
       window.removeEventListener("scroll", handleScroll);
       if (sectionEl && canHover) {
         sectionEl.removeEventListener("mousemove", handleMouseMove);
