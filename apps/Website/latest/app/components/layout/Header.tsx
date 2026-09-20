@@ -19,22 +19,22 @@ export const Header: React.FC<HeaderProps> = ({ content }) => {
           {/* Logo & Brand */}
           <a
             href="#hero"
-            className="flex items-center gap-3.5 group select-none text-white focus:outline-none"
+            className="flex items-center gap-3.5 sm:gap-4 group select-none text-white focus:outline-none"
             aria-label={content.brandName}
           >
             {content.logoUrl ? (
               <img
                 src={content.logoUrl}
                 alt=""
-                className="w-11 h-11 sm:w-12 sm:h-12 object-contain drop-shadow-[0_2px_10px_rgba(0,0,0,0.5)] transition-transform duration-200 group-hover:scale-105"
+                className="w-[52px] h-[52px] sm:w-[58px] sm:h-[58px] lg:w-[62px] lg:h-[62px] object-contain drop-shadow-[0_2px_12px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-105"
                 onError={(e) => {
                   e.currentTarget.style.display = "none";
                 }}
               />
             ) : (
-              <HikatLogoSvg size={44} className="text-white" />
+              <HikatLogoSvg size={56} className="text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.6)]" />
             )}
-            <span className="text-2xl font-black tracking-tight text-white group-hover:text-white/90 transition-colors">
+            <span className="text-2xl sm:text-[26px] font-black tracking-tight text-white group-hover:text-white/90 transition-colors">
               {content.brandName}
             </span>
           </a>

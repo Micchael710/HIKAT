@@ -31,6 +31,7 @@ export interface HeroContent {
   title: string;
   description: string;
   backgroundImage: string;
+  backgroundPosition?: string;
   primaryCta: {
     label: string;
     href: string;

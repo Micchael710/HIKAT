@@ -21,7 +21,8 @@ export const previewWebsiteContent: WebsiteContent = {
     title: "Un mundo de posibilidades",
     description:
       "Explora, crea, sobrevive y progresa en Apparatia. Únete a una comunidad industrial y creativa donde tu imaginación no tiene límites.",
-    backgroundImage: "/assets/backgrounds/hero-home-bg.png",
+    backgroundImage: "/assets/backgrounds/hero-apparatia-bg.png",
+    backgroundPosition: "center 30%",
     primaryCta: {
       label: "Descargar Launcher",
       href: "#descargar",

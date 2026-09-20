@@ -1,8 +1,7 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import type { HeroContent, HeroCard as HeroCardType, HeaderContent } from "../content/types";
 import { Container } from "../components/ui/Container";
 import { ButtonLink } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
 import { Header } from "../components/layout/Header";
 import {
   IconDownload,
@@ -32,16 +31,11 @@ const HeroCardItem: React.FC<{ card: HeroCardType }> = ({ card }) => {
   };
 
   return (
-    <Card
-      interactive
-      className="p-5 sm:p-6 group flex items-center justify-between gap-4"
-      onClick={() => {
-        if (card.href) {
-          window.location.href = card.href;
-        }
-      }}
+    <a
+      href={card.href}
+      className="p-5 sm:p-6 group flex items-center justify-between gap-4 rounded-[22px] border border-white/[0.09] bg-[#121a22]/75 hover:bg-[#121a22]/90 hover:border-white/25 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.45)] transition-all cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
     >
-      <div className="flex items-center gap-4 min-w-0">
+      <div className="flex items-center gap-4 min-w-0 flex-1">
         <div
           className={`w-14 h-14 rounded-2xl border flex items-center justify-center flex-shrink-0 transition-transform duration-200 group-hover:scale-105 ${getBadgeStyle(
             card.badgeType
@@ -49,11 +43,11 @@ const HeroCardItem: React.FC<{ card: HeroCardType }> = ({ card }) => {
         >
           <DynamicBadgeIcon type={card.badgeType} size={28} />
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h3 className="text-base sm:text-lg font-bold text-white tracking-tight group-hover:text-white transition-colors truncate">
             {card.title}
           </h3>
-          <p className="text-xs sm:text-sm text-[#8899aa] leading-snug line-clamp-2 mt-0.5">
+          <p className="text-xs sm:text-sm text-[#8899aa] leading-snug line-clamp-2 mt-0.5 font-normal">
             {card.description}
           </p>
         </div>
@@ -61,17 +55,51 @@ const HeroCardItem: React.FC<{ card: HeroCardType }> = ({ card }) => {
 
       <div className="flex-shrink-0">
         <span
-          className="btn-circle-arrow w-9 h-9 group-hover:bg-white/20 group-hover:border-white/40"
+          className="w-9 h-9 rounded-full bg-white/[0.06] border border-white/[0.1] flex items-center justify-center text-[#8899aa] group-hover:text-white group-hover:bg-white/[0.12] group-hover:border-white/25 transition-all shadow-sm"
           aria-hidden="true"
         >
           <IconArrowRight size={16} />
         </span>
       </div>
-    </Card>
+    </a>
   );
 };
 
 export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent }) => {
+  const bgRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Respect prefers-reduced-motion
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (mediaQuery.matches) {
+      return;
+    }
+
+    let rafId: number | null = null;
+
+    const handleScroll = () => {
+      if (rafId !== null) return;
+
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const scrollY = window.scrollY || window.pageYOffset;
+        // Only calculate parallax when Hero is in viewport
+        if (scrollY < 1200 && bgRef.current) {
+          const offsetY = scrollY * 0.22;
+          bgRef.current.style.transform = `translate3d(0, ${offsetY}px, 0) scale(1.12)`;
+        }
+      });
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+    };
+  }, []);
+
   return (
     <section
       id="hero"
@@ -80,15 +108,18 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
       {/* Background layer with dedicated overflow clipping so sticky header is preserved */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
         <div
-          className="absolute inset-0 bg-cover bg-no-repeat"
+          ref={bgRef}
+          className="absolute inset-0 bg-cover bg-no-repeat will-change-transform scale-[1.12]"
           style={{
             backgroundImage: `url(${content.backgroundImage})`,
-            backgroundPosition: "center 30%",
+            backgroundPosition: content.backgroundPosition || "center 30%",
+            transform: "translate3d(0, 0, 0) scale(1.12)",
           }}
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/95 via-[#090d12]/75 to-transparent" />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#090d12] via-[#090d12]/40 to-transparent" />
-        <div className="absolute inset-0 bg-radial from-transparent via-[#090d12]/30 to-[#090d12]/90" />
+        {/* Balanced contrast overlays: deep readability on left, clear illumination for castle and scenery */}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/92 via-[#090d12]/60 via-45% to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#090d12]/95 via-[#090d12]/30 via-35% to-transparent" />
+        <div className="absolute inset-0 bg-radial from-transparent via-[#090d12]/15 to-[#090d12]/80" />
       </div>
 
       {/* Top Sticky Header (Stays sticky strictly during Hero, scrolls away with Hero geometry) */}
@@ -97,7 +128,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
       </div>
 
       {/* Main Hero Content */}
-      <Container className="relative z-10 my-auto pt-6 sm:pt-8 pb-8">
+      <Container className="relative z-10 my-auto pt-6 sm:pt-8 pb-8 !max-w-[1520px]">
         <div className="max-w-2xl lg:max-w-3xl space-y-6">
           {/* Server Identity / Logo */}
           <div className="flex items-center gap-4">
@@ -133,7 +164,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
               variant="primary"
               href={content.primaryCta.href}
               icon={<IconDownload size={20} />}
-              className="!px-7 !py-3.5 !text-base"
+              className="!px-7 !py-3.5 !text-base !rounded-xl"
             >
               {content.primaryCta.label}
             </ButtonLink>
@@ -142,7 +173,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
               variant="secondary"
               href={content.secondaryCta.href}
               icon={<IconPlay size={18} />}
-              className="!px-6 !py-3.5 !text-base"
+              className="!px-6 !py-3.5 !text-base !rounded-xl"
             >
               {content.secondaryCta.label}
             </ButtonLink>
@@ -151,7 +182,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
       </Container>
 
       {/* Bottom Hero Cards & Centered Scroll Indicator */}
-      <Container className="relative z-10 mt-6 sm:mt-10">
+      <Container className="relative z-10 mt-6 sm:mt-10 !max-w-[1520px]">
         {/* 3 Bottom Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6 mb-6">
           {content.cards.map((card) => (
