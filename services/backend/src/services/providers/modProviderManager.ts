@@ -2053,33 +2053,36 @@ export class ModProviderManager {
             .getVersion(env, manualDepOverride.versionId, depProjectId, manualDepOverride.contentType || undefined)
             .catch(() => null)
 
-          if (manualVersionObj) {
-            const mvLoaders = (manualVersionObj.loaders || []).map((l) => l.toLowerCase())
-            if (
-              manualVersionObj.contentType === "MOD" ||
-              mvLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))
-            ) {
-              depContentType = "MOD"
-            } else if (manualVersionObj.contentType === "DATA_PACK" || mvLoaders.includes("datapack")) {
-              depContentType = "DATA_PACK"
-            } else if (
-              manualVersionObj.contentType === "RESOURCE_PACK" ||
-              (mvLoaders.includes("minecraft") && supportedTypes.includes("RESOURCE_PACK"))
-            ) {
-              depContentType = "RESOURCE_PACK"
-            } else if (manualVersionObj.contentType === "SHADER" || supportedTypes.includes("SHADER")) {
-              depContentType = "SHADER"
-            } else if (manualDepOverride.contentType) {
-              depContentType = manualDepOverride.contentType
-            } else if (supportedTypes.length === 1) {
-              depContentType = supportedTypes[0]!
-            }
+          if (!manualVersionObj) {
+            conflicts.push(
+              `La versión manual seleccionada (${manualDepOverride.versionId}) para "${dep.projectName || depProjectId}" no existe en el proveedor.`,
+            )
+            continue
+          }
+
+          const mvLoaders = (manualVersionObj.loaders || []).map((l) => l.toLowerCase())
+          if (
+            manualVersionObj.contentType === "MOD" ||
+            mvLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))
+          ) {
+            depContentType = "MOD"
+          } else if (manualVersionObj.contentType === "DATA_PACK" || mvLoaders.includes("datapack")) {
+            depContentType = "DATA_PACK"
+          } else if (
+            manualVersionObj.contentType === "RESOURCE_PACK" ||
+            (mvLoaders.includes("minecraft") && supportedTypes.includes("RESOURCE_PACK"))
+          ) {
+            depContentType = "RESOURCE_PACK"
+          } else if (manualVersionObj.contentType === "SHADER" || supportedTypes.includes("SHADER")) {
+            depContentType = "SHADER"
+          } else if (manualDepOverride.contentType) {
+            depContentType = manualDepOverride.contentType
+          } else if (supportedTypes.length === 1) {
+            depContentType = supportedTypes[0]!
           }
 
           if (!depContentType) {
-            const reason = manualVersionObj
-              ? `No se pudo determinar el tipo de contenido para la versión seleccionada manualmente "${manualVersionObj.versionNumber || manualDepOverride.versionId}" de "${dep.projectName || depProjectId}".`
-              : `No se pudo encontrar la versión seleccionada manualmente "${manualDepOverride.versionId}" para la dependencia "${dep.projectName || depProjectId}".`
+            const reason = `No se pudo determinar el tipo de contenido para la versión seleccionada manualmente "${manualVersionObj.versionNumber || manualDepOverride.versionId}" de "${dep.projectName || depProjectId}".`
             warnings.push(reason)
             let allVers: NormalizedModVersion[] = []
             if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {

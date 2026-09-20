@@ -6369,6 +6369,104 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(depItem?.isDependency).toBe(true)
       expect(depItem?.isRequired).toBe(true)
     })
+
+    it("resolveInstallationPlan fails with blocking conflict when manualOverride versionId does not exist in provider", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+
+        // Root mod
+        if (u.includes("/project/root-mod-inexistent/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-root-inexistent",
+                project_id: "root-mod-inexistent",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar", primary: true }],
+                dependencies: [
+                  {
+                    project_id: "dep-proj-target",
+                    dependency_type: "required",
+                  },
+                ],
+              },
+            ],
+          }
+        }
+        if (u.includes("/version/v-root-inexistent")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-root-inexistent",
+              project_id: "root-mod-inexistent",
+              version_number: "1.0.0",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar", primary: true }],
+              dependencies: [
+                {
+                  project_id: "dep-proj-target",
+                  dependency_type: "required",
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("/project/root-mod-inexistent")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "root-mod-inexistent",
+              title: "Root Mod",
+              project_type: "mod",
+              client_side: "required",
+              server_side: "required",
+            }),
+          }
+        }
+
+        // Dependency project exists
+        if (u.includes("/project/dep-proj-target")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "dep-proj-target",
+              title: "Target Dependency",
+              project_type: "mod",
+              client_side: "required",
+              server_side: "required",
+            }),
+          }
+        }
+
+        // Inexistent version or other returns 404
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-mod-inexistent",
+        versionId: "v-root-inexistent",
+        contentType: "MOD",
+        manualOverrides: [
+          {
+            provider: "MODRINTH",
+            projectId: "dep-proj-target",
+            versionId: "v-literally-does-not-exist",
+          },
+        ],
+      })
+
+      expect(plan.isValid).toBe(false)
+      expect(plan.conflicts.some((c) => c.includes("no existe en el proveedor"))).toBe(true)
+    })
   })
 })
 
