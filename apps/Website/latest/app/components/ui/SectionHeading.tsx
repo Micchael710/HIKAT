@@ -46,14 +46,14 @@ export const SectionHeading: React.FC<SectionHeadingProps> = ({
       </div>
 
       {action && (
-        <div className="flex-shrink-0">
+        <div className="flex-shrink-0 pb-1">
           <ButtonLink
             variant="secondary"
             href={action.href}
-            className="!px-4 !py-2 !text-xs !rounded-xl !gap-2 text-white/90 hover:text-white"
+            trailingIcon={<IconArrowRight size={14} />}
+            className="!px-5 !py-2.5 !text-xs sm:!text-sm !rounded-full !gap-3 text-white/90 hover:text-white whitespace-nowrap min-w-[125px] justify-between shadow-sm"
           >
-            <span>{action.label}</span>
-            <IconArrowRight size={14} />
+            {action.label}
           </ButtonLink>
         </div>
       )}

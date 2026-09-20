@@ -5,6 +5,7 @@ export type ButtonVariant = "primary" | "secondary" | "circle-arrow" | "ghost";
 interface BaseButtonProps {
   variant?: ButtonVariant;
   icon?: React.ReactNode;
+  trailingIcon?: React.ReactNode;
   children?: React.ReactNode;
   className?: string;
   "aria-label"?: string;
@@ -38,6 +39,7 @@ const getVariantClasses = (variant: ButtonVariant = "primary"): string => {
 export const Button: React.FC<ButtonProps> = ({
   variant = "primary",
   icon,
+  trailingIcon,
   children,
   className = "",
   type = "button",
@@ -50,7 +52,8 @@ export const Button: React.FC<ButtonProps> = ({
       {...props}
     >
       {icon && <span className="flex-shrink-0">{icon}</span>}
-      {children && <span>{children}</span>}
+      {children && <span className="whitespace-nowrap">{children}</span>}
+      {trailingIcon && <span className="flex-shrink-0">{trailingIcon}</span>}
     </button>
   );
 };
@@ -58,6 +61,7 @@ export const Button: React.FC<ButtonProps> = ({
 export const ButtonLink: React.FC<ButtonLinkProps> = ({
   variant = "primary",
   icon,
+  trailingIcon,
   children,
   className = "",
   href,
@@ -70,7 +74,8 @@ export const ButtonLink: React.FC<ButtonLinkProps> = ({
       {...props}
     >
       {icon && <span className="flex-shrink-0">{icon}</span>}
-      {children && <span>{children}</span>}
+      {children && <span className="whitespace-nowrap">{children}</span>}
+      {trailingIcon && <span className="flex-shrink-0">{trailingIcon}</span>}
     </a>
   );
 };

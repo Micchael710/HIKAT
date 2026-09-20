@@ -9,8 +9,8 @@ export interface FooterProps {
 
 export const Footer: React.FC<FooterProps> = ({ content }) => {
   return (
-    <footer className="w-full border-t border-white/[0.08] bg-[#090d12]/90 backdrop-blur-lg py-8 mt-24">
-      <Container>
+    <footer className="w-full border-t border-white/[0.08] bg-[#090d12]/90 backdrop-blur-lg py-8">
+      <Container className="!max-w-[1520px]">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
           {/* Logo & Brand */}
           <div className="flex items-center gap-3">

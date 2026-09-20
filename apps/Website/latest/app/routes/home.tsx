@@ -106,7 +106,7 @@ export default function Home() {
             <Container className="!max-w-[1520px]">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
                 <NewsSection content={content.news} />
-                <div id="comunidad" className="h-full">
+                <div className="h-full">
                   <CommunitySection content={content.community} />
                 </div>
               </div>

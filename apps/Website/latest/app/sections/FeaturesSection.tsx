@@ -12,31 +12,27 @@ export interface FeaturesSectionProps {
 
 const SecondaryFeatureCard: React.FC<{ item: FeatureItemType }> = ({ item }) => {
   return (
-    <Card
-      interactive
-      className="p-5 sm:p-6 flex items-center justify-between gap-5 group flex-1"
-      onClick={() => {
-        if (item.href) {
-          window.location.href = item.href;
-        }
-      }}
+    <a
+      href={item.href}
+      className="flex-1 p-5 sm:p-6 flex items-center justify-between gap-4 sm:gap-5 rounded-[22px] border border-white/[0.09] bg-[#121a22]/75 hover:bg-[#121a22]/90 hover:border-white/25 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.45)] transition-all group focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 cursor-pointer select-none"
     >
-      <div className="flex items-center gap-4 sm:gap-5 min-w-0">
-        <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-[#090d12] flex-shrink-0 border border-white/[0.08] p-2 flex items-center justify-center">
+      <div className="flex items-center gap-4 sm:gap-5 min-w-0 flex-1">
+        {/* Large square thumbnail with clean rounded corners and isolated overflow */}
+        <div className="w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 rounded-2xl overflow-hidden bg-[#090d12] flex-shrink-0 border border-white/[0.08] relative isolate">
           <img
             src={item.imageUrl}
             alt={item.title}
-            className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
             onError={(e) => {
               e.currentTarget.style.opacity = "0.4";
             }}
           />
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1 space-y-1">
           <h4 className="text-base sm:text-lg font-bold text-white tracking-tight group-hover:text-white transition-colors truncate">
             {item.title}
           </h4>
-          <p className="text-xs sm:text-sm text-[#8899aa] leading-relaxed line-clamp-2 mt-1">
+          <p className="text-xs sm:text-sm text-[#8899aa] leading-relaxed line-clamp-2 font-normal">
             {item.description}
           </p>
         </div>
@@ -44,13 +40,13 @@ const SecondaryFeatureCard: React.FC<{ item: FeatureItemType }> = ({ item }) => 
 
       <div className="flex-shrink-0">
         <span
-          className="btn-circle-arrow w-10 h-10 group-hover:bg-white/20 group-hover:border-white/40"
+          className="w-10 h-10 rounded-full bg-white/[0.06] border border-white/[0.1] flex items-center justify-center text-[#8899aa] group-hover:text-white group-hover:bg-white/[0.12] group-hover:border-white/25 transition-all shadow-sm"
           aria-hidden="true"
         >
           <IconArrowRight size={16} />
         </span>
       </div>
-    </Card>
+    </a>
   );
 };
 
@@ -58,31 +54,42 @@ export const FeaturesSection: React.FC<FeaturesSectionProps> = ({ content }) => 
   const { featured, secondaryItems } = content;
 
   return (
-    <section id="features" className="pt-10 sm:pt-14 pb-16 sm:pb-24">
-      <Container>
+    <section id="comunidad" className="relative pt-12 sm:pt-16 pb-16 sm:pb-24 overflow-hidden">
+      {/* Atmospheric deep cyan / navy glow background */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
+        <div className="absolute inset-0 bg-[#090d12]" />
+        {/* Soft atmospheric ambient glow */}
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[550px] bg-gradient-to-b from-[#0e2a40]/30 via-[#0a1c2c]/15 to-transparent rounded-full filter blur-3xl opacity-80" />
+        <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-[#090d12] via-[#090d12]/60 to-transparent" />
+      </div>
+
+      <Container className="relative z-10 !max-w-[1520px]">
         {/* Section Heading with seamlessly aligned View All CTA */}
         <SectionHeading
           title={content.title}
           description={content.description}
           action={content.viewAllAction}
-          className="!mb-8"
+          className="!mb-8 sm:!mb-10"
         />
 
         {/* 2-Column Split: Dominant Featured Card on Left (7 cols), 3 Stacked Secondary Cards on Right (5 cols) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-          {/* Featured Dominant Card */}
+          {/* Featured Dominant Card on Left */}
           <div className="lg:col-span-7 flex">
-            <Card
-              className="relative w-full min-h-[520px] sm:min-h-[560px] p-8 sm:p-12 flex flex-col justify-end overflow-hidden"
-              style={{
-                backgroundImage: `url(${featured.backgroundImage})`,
-                backgroundSize: "cover",
-                backgroundPosition: "center 40%",
-              }}
-            >
-              {/* Vignette and text protection gradients */}
-              <div className="absolute inset-0 bg-gradient-to-t from-[#090d12] via-[#090d12]/60 to-transparent pointer-events-none" />
-              <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/80 via-transparent to-transparent pointer-events-none" />
+            <Card className="relative w-full min-h-[500px] sm:min-h-[560px] lg:min-h-[600px] p-7 sm:p-10 flex flex-col justify-end overflow-hidden rounded-[26px] border border-white/[0.1] bg-[#121a22]/85 backdrop-blur-xl shadow-[0_12px_40px_rgba(0,0,0,0.5)]">
+              {/* Absolute internal media layer with rounded-[inherit] preventing any border clipping */}
+              {featured.backgroundImage && (
+                <div className="absolute inset-0 overflow-hidden pointer-events-none select-none rounded-[inherit]">
+                  <img
+                    src={featured.backgroundImage}
+                    alt=""
+                    className="w-full h-full object-cover object-[center_35%]"
+                  />
+                  {/* Smooth vignette and text protection gradients */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#090d12]/98 via-[#090d12]/60 via-40% to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/70 via-transparent via-50% to-transparent" />
+                </div>
+              )}
 
               {/* Bottom text & CTA */}
               <div className="relative z-10 space-y-4 max-w-xl">
@@ -90,7 +97,7 @@ export const FeaturesSection: React.FC<FeaturesSectionProps> = ({ content }) => 
                   <img
                     src={featured.serverLogoUrl}
                     alt={featured.serverName}
-                    className="h-10 sm:h-12 object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)]"
+                    className="h-10 sm:h-12 w-auto object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.8)]"
                     onError={(e) => {
                       e.currentTarget.style.display = "none";
                     }}
@@ -101,11 +108,11 @@ export const FeaturesSection: React.FC<FeaturesSectionProps> = ({ content }) => 
                   </span>
                 )}
 
-                <h3 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight leading-tight drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">
+                <h3 className="text-2xl sm:text-3xl lg:text-[34px] font-black text-white tracking-tight leading-tight drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">
                   {featured.title}
                 </h3>
 
-                <p className="text-xs sm:text-sm text-[#8899aa] leading-relaxed font-normal">
+                <p className="text-xs sm:text-sm text-[#8899aa] leading-relaxed font-normal drop-shadow-[0_1px_6px_rgba(0,0,0,0.8)]">
                   {featured.description}
                 </p>
 
@@ -123,8 +130,8 @@ export const FeaturesSection: React.FC<FeaturesSectionProps> = ({ content }) => 
             </Card>
           </div>
 
-          {/* 3 Secondary Stacked Cards */}
-          <div className="lg:col-span-5 flex flex-col justify-between gap-4">
+          {/* 3 Secondary Stacked Cards on Right */}
+          <div className="lg:col-span-5 flex flex-col justify-between gap-4 sm:gap-5">
             {secondaryItems.map((item) => (
               <SecondaryFeatureCard key={item.id} item={item} />
             ))}
