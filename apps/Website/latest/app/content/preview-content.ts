@@ -205,7 +205,7 @@ export const previewWebsiteContent: WebsiteContent = {
   },
   footer: {
     brandName: "HiKAT",
-    copyright: "© 2024 HiKAT Community. Todos los derechos reservados.",
+    copyright: "© 2026 HiKAT Community. Todos los derechos reservados.",
     socialLinks: [
       {
         id: "discord",
