@@ -13,7 +13,7 @@ const NewsCardItem: React.FC<{ item: NewsItemType }> = ({ item }) => {
       href={item.href}
       className="group flex items-center gap-3.5 p-2.5 sm:p-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/20 transition-all duration-200"
     >
-      <div className="w-20 h-16 sm:w-24 sm:h-18 rounded-lg overflow-hidden flex-shrink-0 bg-[#090d12] border border-white/[0.08]">
+      <div className="w-20 h-16 sm:w-24 sm:h-18 rounded-xl overflow-hidden flex-shrink-0 bg-[#090d12] border border-white/[0.08]">
         <img
           src={item.imageUrl}
           alt={item.title}
@@ -40,7 +40,7 @@ const NewsCardItem: React.FC<{ item: NewsItemType }> = ({ item }) => {
 
 export const NewsSection: React.FC<NewsSectionProps> = ({ content }) => {
   return (
-    <Card className="h-full p-6 sm:p-8 flex flex-col justify-between bg-[#121a22]/75 backdrop-blur-xl border-white/[0.1] shadow-[0_8px_30px_rgba(0,0,0,0.45)]">
+    <Card className="h-full p-6 sm:p-8 flex flex-col justify-between bg-[#121a22]/80 backdrop-blur-xl border-white/[0.1] shadow-[0_8px_30px_rgba(0,0,0,0.45)]">
       <div className="space-y-6">
         {/* Top Header Bar: Eyebrow on left, View All on right */}
         <div className="flex items-center justify-between gap-4">

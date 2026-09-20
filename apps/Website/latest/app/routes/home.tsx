@@ -37,23 +37,24 @@ export default function Home() {
           className="relative py-14 sm:py-20 overflow-hidden"
           aria-label="Aventura y Novedades"
         >
-          {/* Atmospheric Minecraft/Hytale background layer with controlled blur & smooth section fades */}
-          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          {/* Atmospheric Minecraft/Hytale background layer with controlled blur & top-right building placement */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
             {content.journey.sectionBackgroundImage && (
               <div
-                className="absolute inset-0 bg-cover bg-center bg-no-repeat scale-105 filter blur-[6px] opacity-40"
+                className="absolute inset-0 bg-cover bg-no-repeat scale-105 filter blur-[2.5px] opacity-65 transition-all"
                 style={{
                   backgroundImage: `url(${content.journey.sectionBackgroundImage})`,
+                  backgroundPosition: "right 15% top",
                 }}
               />
             )}
-            {/* Deep dark slate atmospheric overlay */}
-            <div className="absolute inset-0 bg-[#090d12]/75" />
-            <div className="absolute inset-0 bg-radial from-transparent via-[#090d12]/35 to-[#090d12]/95" />
+            {/* Deep dark slate atmospheric gradient: darker on left for text, clear on right for illuminated scenery */}
+            <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/95 via-[#090d12]/65 via-50% to-[#090d12]/25" />
+            <div className="absolute inset-0 bg-radial from-transparent via-[#090d12]/20 to-[#090d12]/80" />
 
-            {/* Smooth gradient fades for seamless transitions with Hero and Features */}
-            <div className="absolute top-0 left-0 right-0 h-36 bg-gradient-to-b from-[#090d12] via-[#090d12]/80 to-transparent" />
-            <div className="absolute bottom-0 left-0 right-0 h-36 bg-gradient-to-t from-[#090d12] via-[#090d12]/80 to-transparent" />
+            {/* Smooth gradient fades for seamless transitions with Hero above and Features below */}
+            <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-[#090d12] via-[#090d12]/80 to-transparent" />
+            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-[#090d12] via-[#090d12]/80 to-transparent" />
           </div>
 
           {/* Unified Section Content */}

@@ -11,20 +11,20 @@ export interface CommunitySectionProps {
 const getBenefitIcon = (iconName: string) => {
   switch (iconName) {
     case "gear":
-      return <IconGear size={16} className="text-orange-400" />;
+      return <IconGear size={18} className="text-cyan-400" />;
     case "bars":
-      return <IconBars size={16} className="text-cyan-400" />;
+      return <IconBars size={18} className="text-cyan-400" />;
     case "users":
-      return <IconUsers size={16} className="text-purple-400" />;
+      return <IconUsers size={18} className="text-cyan-400" />;
     default:
-      return <IconGear size={16} className="text-orange-400" />;
+      return <IconGear size={18} className="text-cyan-400" />;
   }
 };
 
 export const CommunitySection: React.FC<CommunitySectionProps> = ({ content }) => {
   return (
     <Card
-      className="relative h-full p-6 sm:p-8 flex flex-col justify-between overflow-hidden bg-[#121a22]/75 backdrop-blur-xl border-white/[0.1] shadow-[0_8px_30px_rgba(0,0,0,0.45)]"
+      className="relative h-full p-6 sm:p-8 flex flex-col justify-between overflow-hidden bg-[#121a22]/80 backdrop-blur-xl border-white/[0.1] shadow-[0_8px_30px_rgba(0,0,0,0.45)]"
       style={{
         backgroundImage: content.backgroundImage
           ? `url(${content.backgroundImage})`
@@ -33,9 +33,9 @@ export const CommunitySection: React.FC<CommunitySectionProps> = ({ content }) =
         backgroundPosition: "right center",
       }}
     >
-      {/* Directional gradient overlay: dark on left for text legibility, clear on right to showcase forge artwork */}
-      <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/95 via-[#090d12]/60 to-transparent pointer-events-none" />
-      <div className="absolute inset-0 bg-gradient-to-t from-[#090d12]/90 via-[#090d12]/30 to-transparent pointer-events-none" />
+      {/* Smooth directional gradient overlay: dark text zone on left, smooth fade to showcase forge artwork on right */}
+      <div className="absolute inset-0 bg-gradient-to-r from-[#0c1622]/98 via-[#0c1622]/80 via-40% to-transparent pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-t from-[#0c1622]/90 via-[#0c1622]/30 via-40% to-transparent pointer-events-none" />
 
       {/* Main Content */}
       <div className="relative z-10 space-y-5">
@@ -71,15 +71,15 @@ export const CommunitySection: React.FC<CommunitySectionProps> = ({ content }) =
         </div>
       </div>
 
-      {/* Bottom Benefit Chips */}
-      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-6 mt-6 border-t border-white/[0.08]">
+      {/* Bottom Benefit Chips: Uniform, compact, perfectly aligned 3-column row */}
+      <div className="relative z-10 grid grid-cols-3 gap-2.5 sm:gap-3 pt-5 mt-5 border-t border-white/[0.08]">
         {content.benefits.map((benefit: CommunityBenefit) => (
           <div
             key={benefit.id}
-            className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#090d12]/75 border border-white/[0.1] backdrop-blur-md shadow-sm"
+            className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-[#090f17]/65 border border-white/[0.08] backdrop-blur-md shadow-sm h-full"
           >
             <span className="flex-shrink-0">{getBenefitIcon(benefit.icon)}</span>
-            <span className="text-[11px] sm:text-xs font-semibold text-white/95 leading-tight">
+            <span className="text-[11px] sm:text-xs font-semibold text-white/90 leading-tight select-none">
               {benefit.label}
             </span>
           </div>
