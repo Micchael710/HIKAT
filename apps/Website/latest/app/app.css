@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --color-hikat-screen: #090d12;
+  --color-hikat-base: #1a2228;
+  --color-hikat-surface: #121a22;
+  --color-hikat-surface-alt: #11181f;
+  --color-hikat-surface-inner: #080e13;
+  --color-hikat-surface-hover: #15222b;
+  --color-hikat-border-subtle: rgba(255, 255, 255, 0.08);
+  --color-hikat-border-medium: rgba(255, 255, 255, 0.14);
+  --color-hikat-border-hover: rgba(255, 255, 255, 0.32);
+  --color-hikat-text-primary: #ffffff;
+  --color-hikat-text-secondary: #8899aa;
+  --color-hikat-text-tertiary: #657788;
+  --color-hikat-text-muted: rgba(255, 255, 255, 0.45);
+  --color-hikat-accent-orange: #f97316;
+  --color-hikat-accent-orange-hover: #ea580c;
+  --color-hikat-accent-blue: #295372;
+}
+
+:root {
+  --hikat-bg-screen: #090d12;
+  --hikat-bg-base: #1a2228;
+  --hikat-surface: #121a22;
+  --hikat-surface-alt: #11181f;
+  --hikat-surface-inner: #080e13;
+  --hikat-surface-hover: #15222b;
+  --hikat-surface-glass: rgba(18, 26, 34, 0.72);
+  --hikat-border-subtle: rgba(255, 255, 255, 0.08);
+  --hikat-border-medium: rgba(255, 255, 255, 0.14);
+  --hikat-border-hover: rgba(255, 255, 255, 0.35);
+  --hikat-text-primary: #ffffff;
+  --hikat-text-secondary: #8899aa;
+  --hikat-text-tertiary: #657788;
+  --hikat-text-muted: rgba(255, 255, 255, 0.45);
+  --hikat-accent-orange: #f97316;
+  --hikat-accent-orange-hover: #ea580c;
+  --hikat-accent-blue: #295372;
+  --hikat-accent-blue-rgb: 41, 83, 114;
+  --hikat-radius-sm: 8px;
+  --hikat-radius-md: 14px;
+  --hikat-radius-lg: 20px;
+  --hikat-radius-xl: 28px;
+  --hikat-radius-full: 9999px;
+  --hikat-shadow-card: 0 8px 30px rgba(0, 0, 0, 0.45);
+  --hikat-shadow-elevated: 0 16px 48px rgba(0, 0, 0, 0.65);
+  --hikat-shadow-orange: 0 4px 20px rgba(249, 115, 22, 0.38);
+  --hikat-transition-fast: 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  --hikat-transition-normal: 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
+  background-color: var(--hikat-bg-screen);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--hikat-bg-screen);
+  color: var(--hikat-text-primary);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Scrollbar for Website */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #090d12;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Launcher-grade Button Styles & Microinteractions */
+.btn-primary-orange {
+  background: linear-gradient(135deg, #ff7a18 0%, #ff5200 100%);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 4px 18px rgba(249, 115, 22, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+  font-weight: 600;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease, filter 0.2s ease, border-color 0.2s ease;
+  will-change: transform, box-shadow;
+}
+
+.btn-primary-orange:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+  box-shadow: 0 8px 28px rgba(249, 115, 22, 0.5), 0 0 14px rgba(255, 122, 24, 0.35);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.btn-primary-orange:active {
+  transform: translateY(1px) scale(0.98) !important;
+  filter: brightness(0.93) !important;
+  box-shadow: 0 2px 8px rgba(249, 115, 22, 0.3), inset 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+  transition: transform 0.08s ease, filter 0.08s ease, box-shadow 0.08s ease !important;
+}
+
+.btn-secondary-glass {
+  background: rgba(18, 26, 34, 0.65);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #ffffff;
+  font-weight: 600;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  will-change: transform;
+}
+
+.btn-secondary-glass:hover {
+  background: rgba(23, 35, 44, 0.85);
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.btn-secondary-glass:active {
+  transform: translateY(1px) scale(0.98) !important;
+  background: rgba(14, 21, 27, 0.95) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+  transition: transform 0.08s ease !important;
+}
+
+.btn-circle-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  color: rgba(255, 255, 255, 0.8);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.btn-circle-arrow:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #ffffff;
+  transform: translateX(3px) scale(1.06);
+}
+
+.btn-circle-arrow:active {
+  transform: translateX(1px) scale(0.94) !important;
+}
+
+/* Glass & Card Surfaces */
+.hikat-glass-card {
+  background: rgba(18, 26, 34, 0.75);
+  border: 1.5px solid rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-radius: var(--hikat-radius-lg);
+  box-shadow: var(--hikat-shadow-card);
+  transition: border-color 0.22s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease;
+}
+
+.hikat-glass-card-interactive:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+  transform: translateY(-4px);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.55), 0 0 20px rgba(255, 255, 255, 0.03);
+}
+
+/* Floating mouse scroll indicator animation */
+@keyframes mouseWheelFloat {
+  0%, 100% {
+    transform: translateY(0);
+    opacity: 0.9;
+  }
+  50% {
+    transform: translateY(6px);
+    opacity: 0.4;
+  }
+}
+
+.mouse-scroll-wheel {
+  animation: mouseWheelFloat 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
