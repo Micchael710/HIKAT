@@ -75,26 +75,29 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
   return (
     <section
       id="hero"
-      className="relative min-h-[95vh] lg:min-h-screen flex flex-col justify-between pb-8 overflow-hidden"
-      style={{
-        backgroundImage: `url(${content.backgroundImage})`,
-        backgroundSize: "cover",
-        backgroundPosition: "center 30%",
-        backgroundRepeat: "no-repeat",
-      }}
+      className="relative min-h-[95vh] lg:min-h-screen flex flex-col justify-between pb-8"
     >
-      {/* Dark launcher background gradient overlays */}
-      <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/95 via-[#090d12]/75 to-transparent pointer-events-none" />
-      <div className="absolute inset-0 bg-gradient-to-t from-[#090d12] via-[#090d12]/40 to-transparent pointer-events-none" />
-      <div className="absolute inset-0 bg-radial from-transparent via-[#090d12]/30 to-[#090d12]/90 pointer-events-none" />
+      {/* Background layer with dedicated overflow clipping so sticky header is preserved */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
+        <div
+          className="absolute inset-0 bg-cover bg-no-repeat"
+          style={{
+            backgroundImage: `url(${content.backgroundImage})`,
+            backgroundPosition: "center 30%",
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/95 via-[#090d12]/75 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#090d12] via-[#090d12]/40 to-transparent" />
+        <div className="absolute inset-0 bg-radial from-transparent via-[#090d12]/30 to-[#090d12]/90" />
+      </div>
 
-      {/* Top Floating Glass Header (Stays in Hero, naturally scrolls away) */}
-      <div className="relative z-20">
+      {/* Top Sticky Header (Stays sticky strictly during Hero, scrolls away with Hero geometry) */}
+      <div className="sticky top-0 z-50 w-full pointer-events-none">
         <Header content={headerContent} />
       </div>
 
       {/* Main Hero Content */}
-      <Container className="relative z-10 my-auto pt-10 sm:pt-14 pb-8">
+      <Container className="relative z-10 my-auto pt-6 sm:pt-8 pb-8">
         <div className="max-w-2xl lg:max-w-3xl space-y-6">
           {/* Server Identity / Logo */}
           <div className="flex items-center gap-4">
@@ -156,12 +159,12 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent
           ))}
         </div>
 
-        {/* Centered Scroll Indicator (No side text banners) */}
+        {/* Centered Scroll Indicator linking directly to #novedades */}
         <div className="flex items-center justify-center pt-2 text-[#8899aa] select-none">
           <a
-            href="#aventura"
-            aria-label="Desplazarse hacia abajo"
-            className="flex flex-col items-center gap-1 hover:text-white transition-colors"
+            href="#novedades"
+            aria-label="Desplazarse hacia novedades"
+            className="flex flex-col items-center gap-1 hover:text-white transition-colors cursor-pointer"
           >
             <IconMouseScroll size={22} />
           </a>

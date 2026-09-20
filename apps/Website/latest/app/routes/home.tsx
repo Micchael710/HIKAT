@@ -44,7 +44,7 @@ export default function Home() {
                 className="absolute inset-0 bg-cover bg-no-repeat scale-105 filter blur-[2.5px] opacity-65 transition-all"
                 style={{
                   backgroundImage: `url(${content.journey.sectionBackgroundImage})`,
-                  backgroundPosition: "right 15% top",
+                  backgroundPosition: content.journey.sectionBackgroundPosition || "right 5% top",
                 }}
               />
             )}

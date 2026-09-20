@@ -23,19 +23,20 @@ const getBenefitIcon = (iconName: string) => {
 
 export const CommunitySection: React.FC<CommunitySectionProps> = ({ content }) => {
   return (
-    <Card
-      className="relative h-full p-6 sm:p-8 flex flex-col justify-between overflow-hidden bg-[#121a22]/80 backdrop-blur-xl border-white/[0.1] shadow-[0_8px_30px_rgba(0,0,0,0.45)]"
-      style={{
-        backgroundImage: content.backgroundImage
-          ? `url(${content.backgroundImage})`
-          : undefined,
-        backgroundSize: "cover",
-        backgroundPosition: "right center",
-      }}
-    >
-      {/* Smooth directional gradient overlay: dark text zone on left, smooth fade to showcase forge artwork on right */}
-      <div className="absolute inset-0 bg-gradient-to-r from-[#0c1622]/98 via-[#0c1622]/80 via-40% to-transparent pointer-events-none" />
-      <div className="absolute inset-0 bg-gradient-to-t from-[#0c1622]/90 via-[#0c1622]/30 via-40% to-transparent pointer-events-none" />
+    <Card className="relative h-full p-6 sm:p-8 flex flex-col justify-between overflow-hidden rounded-[24px] border border-white/[0.1] bg-[#121a22]/85 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.45)]">
+      {/* Absolute internal media layer with rounded-[inherit] preventing any border clipping artifacts */}
+      {content.backgroundImage && (
+        <div className="absolute inset-0 overflow-hidden pointer-events-none select-none rounded-[inherit]">
+          <img
+            src={content.backgroundImage}
+            alt=""
+            className="w-full h-full object-cover object-[right_bottom] scale-105"
+          />
+          {/* Smooth directional gradient overlay: dark on left for text contrast, clear on right to showcase forge artwork */}
+          <div className="absolute inset-0 bg-gradient-to-r from-[#0c1622]/98 via-[#0c1622]/80 via-45% to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0c1622]/95 via-[#0c1622]/20 via-40% to-transparent" />
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="relative z-10 space-y-5">
@@ -71,18 +72,29 @@ export const CommunitySection: React.FC<CommunitySectionProps> = ({ content }) =
         </div>
       </div>
 
-      {/* Bottom Benefit Chips: Uniform, compact, perfectly aligned 3-column row */}
-      <div className="relative z-10 grid grid-cols-3 gap-2.5 sm:gap-3 pt-5 mt-5 border-t border-white/[0.08]">
-        {content.benefits.map((benefit: CommunityBenefit) => (
-          <div
-            key={benefit.id}
-            className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-[#090f17]/65 border border-white/[0.08] backdrop-blur-md shadow-sm h-full"
-          >
-            <span className="flex-shrink-0">{getBenefitIcon(benefit.icon)}</span>
-            <span className="text-[11px] sm:text-xs font-semibold text-white/90 leading-tight select-none">
-              {benefit.label}
-            </span>
-          </div>
+      {/* Bottom Benefit Row: square icon tile + 2-line text + subtle vertical dividers */}
+      <div className="relative z-10 flex items-center justify-between gap-3 sm:gap-4 pt-5 mt-5 border-t border-white/[0.08]">
+        {content.benefits.map((benefit: CommunityBenefit, index: number) => (
+          <React.Fragment key={benefit.id}>
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              {/* Small square tile with icon */}
+              <div className="w-9 h-9 rounded-lg bg-[#0c1a26]/85 border border-cyan-500/25 flex items-center justify-center flex-shrink-0 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.15)]">
+                {getBenefitIcon(benefit.icon)}
+              </div>
+              {/* Unboxed 2-line text */}
+              <span className="text-[11px] sm:text-xs font-semibold text-white/90 leading-tight select-none whitespace-pre-line">
+                {benefit.label}
+              </span>
+            </div>
+
+            {/* Subtle vertical divider between items */}
+            {index < content.benefits.length - 1 && (
+              <div
+                className="w-[1px] h-7 bg-white/[0.1] flex-shrink-0 self-center"
+                aria-hidden="true"
+              />
+            )}
+          </React.Fragment>
         ))}
       </div>
     </Card>

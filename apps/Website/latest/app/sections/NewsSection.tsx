@@ -13,7 +13,7 @@ const NewsCardItem: React.FC<{ item: NewsItemType }> = ({ item }) => {
       href={item.href}
       className="group flex items-center gap-3.5 p-2.5 sm:p-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/20 transition-all duration-200"
     >
-      <div className="w-20 h-16 sm:w-24 sm:h-18 rounded-xl overflow-hidden flex-shrink-0 bg-[#090d12] border border-white/[0.08]">
+      <div className="w-20 h-16 sm:w-24 sm:h-18 rounded-xl overflow-hidden flex-shrink-0 bg-[#090d12] border border-white/[0.08] relative isolate">
         <img
           src={item.imageUrl}
           alt={item.title}

@@ -58,7 +58,8 @@ export const previewWebsiteContent: WebsiteContent = {
     ],
   },
   journey: {
-    sectionBackgroundImage: "/assets/backgrounds/login-bg.png",
+    sectionBackgroundImage: "/assets/backgrounds/journey-bg.jpg",
+    sectionBackgroundPosition: "right 5% top",
     eyebrow: "CONSTRUYE SIN LÍMITES",
     title: "Comienza tu aventura",
     description:
@@ -86,7 +87,7 @@ export const previewWebsiteContent: WebsiteContent = {
         description: "Conéctate, conoce gente y vive grandes aventuras.",
       },
     ],
-    sideIllustrationUrl: "/assets/backgrounds/login-bg.png",
+    sideIllustrationUrl: "/assets/backgrounds/journey-bg.jpg",
   },
   news: {
     eyebrow: "NOVEDADES",
@@ -134,22 +135,22 @@ export const previewWebsiteContent: WebsiteContent = {
       label: "Únete a la comunidad",
       href: "https://discord.gg",
     },
-    backgroundImage: "/assets/backgrounds/login-bg.png",
+    backgroundImage: "/assets/backgrounds/journey-bg.jpg",
     benefits: [
       {
         id: "b1",
         icon: "gear",
-        label: "Construye y automatiza",
+        label: "Construye\ny automatiza",
       },
       {
         id: "b2",
         icon: "bars",
-        label: "Progresa en comunidad",
+        label: "Progresa\nen comunidad",
       },
       {
         id: "b3",
         icon: "users",
-        label: "Comparte tus creaciones",
+        label: "Comparte\ntus creaciones",
       },
     ],
   },
