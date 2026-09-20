@@ -5969,6 +5969,43 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(allVersions[64]?.id).toBe("1064")
     })
 
+    it("CurseForge adapter getProjectVersions breaks loop when provider repeatedly returns identical page", async () => {
+      const cfAdapter = new CurseForgeAdapter()
+      const mockCfEnv = {
+        CURSEFORGE_API_KEY: "test-cf-key",
+      } as any
+
+      let fetchCallCount = 0
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/files?")) {
+          fetchCallCount++
+          const repeatedFiles = Array.from({ length: 50 }, (_, i) => ({
+            id: 2000 + i,
+            displayName: `File ${i}`,
+            fileName: `file-${i}.jar`,
+            gameVersions: ["1.21.1"],
+            dependencies: [],
+          }))
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: repeatedFiles,
+              pagination: { index: 0, pageSize: 50, resultCount: 50, totalCount: 500 },
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const allVersions = await cfAdapter.getProjectVersions(mockCfEnv, "999888", "MOD")
+      expect(fetchCallCount).toBe(2)
+      expect(allVersions.length).toBe(50)
+      expect(allVersions[0]?.id).toBe("2000")
+      expect(allVersions[49]?.id).toBe("2049")
+    })
+
     it("resolveInstallationPlan applies environmentOverride to MODRINTH root when environment is UNKNOWN/null", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
@@ -6149,6 +6186,188 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           adminUserId,
         ),
       ).rejects.toThrow(/Se requiere especificar el entorno de ejecución \(Solo cliente, Cliente y servidor, o Solo servidor\)/)
+    })
+
+    it("resolveInstallationPlan handles ambiguous MOD+DATA_PACK dependency as unresolved, then resolves to MOD via manualOverride", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+
+        // Root mod
+        if (u.includes("/project/root-with-ambig-dep/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-root-1",
+                project_id: "root-with-ambig-dep",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar", primary: true }],
+                dependencies: [
+                  {
+                    project_id: "dep-ambig-multi",
+                    dependency_type: "required",
+                  },
+                ],
+              },
+            ],
+          }
+        }
+        if (u.includes("/version/v-root-1")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-root-1",
+              project_id: "root-with-ambig-dep",
+              version_number: "1.0.0",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "root.jar", size: 1000, url: "https://cdn/root.jar", primary: true }],
+              dependencies: [
+                {
+                  project_id: "dep-ambig-multi",
+                  dependency_type: "required",
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("/project/root-with-ambig-dep")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "root-with-ambig-dep",
+              title: "Root Mod",
+              project_type: "mod",
+              client_side: "required",
+              server_side: "required",
+            }),
+          }
+        }
+
+        // Ambiguous dependency project
+        if (u.includes("/project/dep-ambig-multi/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-dep-mod",
+                project_id: "dep-ambig-multi",
+                version_number: "2.0.0-mod",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ filename: "dep-mod.jar", size: 2000, url: "https://cdn/dep-mod.jar", primary: true }],
+                dependencies: [],
+              },
+              {
+                id: "v-dep-datapack",
+                project_id: "dep-ambig-multi",
+                version_number: "2.0.0-dp",
+                game_versions: ["1.21.1"],
+                loaders: ["datapack"],
+                files: [{ filename: "dep-pack.zip", size: 1500, url: "https://cdn/dep-pack.zip", primary: true }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/version/v-dep-mod")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-dep-mod",
+              project_id: "dep-ambig-multi",
+              version_number: "2.0.0-mod",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "dep-mod.jar", size: 2000, url: "https://cdn/dep-mod.jar", primary: true }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/version/v-dep-datapack")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-dep-datapack",
+              project_id: "dep-ambig-multi",
+              version_number: "2.0.0-dp",
+              game_versions: ["1.21.1"],
+              loaders: ["datapack"],
+              files: [{ filename: "dep-pack.zip", size: 1500, url: "https://cdn/dep-pack.zip", primary: true }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/dep-ambig-multi")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "dep-ambig-multi",
+              title: "Ambiguous Dependency",
+              project_type: "mod",
+              all_project_types: ["mod", "datapack"],
+              client_side: "required",
+              server_side: "required",
+            }),
+          }
+        }
+
+        return { ok: false, status: 404 }
+      })
+
+      // 1. Initial plan without manual override: ambiguous dependency is unresolved, includeAllVersions returns both versions
+      const plan1 = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-with-ambig-dep",
+        versionId: "v-root-1",
+        contentType: "MOD",
+        includeAllVersions: true,
+      })
+
+      expect(plan1.isValid).toBe(true)
+      expect(plan1.items).toHaveLength(1)
+      expect(plan1.items[0]?.projectId).toBe("root-with-ambig-dep")
+      expect(plan1.unresolvedDependencies).toHaveLength(1)
+      expect(plan1.unresolvedDependencies[0]?.projectId).toBe("dep-ambig-multi")
+      expect(plan1.unresolvedDependencies[0]?.contentType).toBeNull()
+      expect(plan1.unresolvedDependencies[0]?.reason).toMatch(/multi-tipo|ambigua/)
+      expect(plan1.unresolvedDependencies[0]?.allVersions?.length).toBe(2)
+
+      // 2. New plan with manualOverride selecting the MOD version: resolves dependency as MOD and adds it to items
+      const plan2 = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-with-ambig-dep",
+        versionId: "v-root-1",
+        contentType: "MOD",
+        includeAllVersions: true,
+        manualOverrides: [
+          {
+            provider: "MODRINTH",
+            projectId: "dep-ambig-multi",
+            versionId: "v-dep-mod",
+          },
+        ],
+      })
+
+      expect(plan2.isValid).toBe(true)
+      expect(plan2.unresolvedDependencies).toHaveLength(0)
+      expect(plan2.items).toHaveLength(2)
+      const depItem = plan2.items.find((i) => i.projectId === "dep-ambig-multi")
+      expect(depItem).toBeDefined()
+      expect(depItem?.contentType).toBe("MOD")
+      expect(depItem?.versionId).toBe("v-dep-mod")
+      expect(depItem?.filename).toBe("dep-mod.jar")
+      expect(depItem?.isDependency).toBe(true)
+      expect(depItem?.isRequired).toBe(true)
     })
   })
 })

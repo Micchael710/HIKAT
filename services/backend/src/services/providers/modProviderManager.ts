@@ -2042,36 +2042,111 @@ export class ModProviderManager {
           }
         }
 
-        if (pinnedVersionObj) {
-          const vLoaders = (pinnedVersionObj.loaders || []).map((l) => l.toLowerCase())
-          if (vLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))) {
-            depContentType = "MOD"
-          } else if (vLoaders.includes("datapack")) {
-            depContentType = "DATA_PACK"
-          } else if (vLoaders.includes("minecraft") && supportedTypes.includes("RESOURCE_PACK")) {
-            depContentType = "RESOURCE_PACK"
-          } else if (
-            supportedTypes.includes("SHADER") &&
-            !supportedTypes.includes("MOD") &&
-            !supportedTypes.includes("RESOURCE_PACK") &&
-            !supportedTypes.includes("DATA_PACK")
-          ) {
-            depContentType = "SHADER"
-          } else if (supportedTypes.length === 1) {
-            depContentType = supportedTypes[0]!
-          } else if (supportedTypes.length > 1) {
-            // Cross supported types with version metadata
-            const candidateTypes = supportedTypes.filter((t) => {
-              if (t === "MOD") return vLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))
-              if (t === "DATA_PACK") return vLoaders.includes("datapack")
-              if (t === "RESOURCE_PACK") return vLoaders.includes("minecraft")
-              if (t === "SHADER") return true
-              return false
+        // Check if there is an authoritative manualOverride for this dependency (provider + projectId)
+        const manualDepOverride = input.manualOverrides?.find(
+          (o) => o.provider === current.provider && o.projectId === depProjectId,
+        )
+        let manualVersionObj: NormalizedModVersion | null = null
+
+        if (manualDepOverride?.versionId) {
+          manualVersionObj = await depAdapter
+            .getVersion(env, manualDepOverride.versionId, depProjectId, manualDepOverride.contentType || undefined)
+            .catch(() => null)
+
+          if (manualVersionObj) {
+            const mvLoaders = (manualVersionObj.loaders || []).map((l) => l.toLowerCase())
+            if (
+              manualVersionObj.contentType === "MOD" ||
+              mvLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))
+            ) {
+              depContentType = "MOD"
+            } else if (manualVersionObj.contentType === "DATA_PACK" || mvLoaders.includes("datapack")) {
+              depContentType = "DATA_PACK"
+            } else if (
+              manualVersionObj.contentType === "RESOURCE_PACK" ||
+              (mvLoaders.includes("minecraft") && supportedTypes.includes("RESOURCE_PACK"))
+            ) {
+              depContentType = "RESOURCE_PACK"
+            } else if (manualVersionObj.contentType === "SHADER" || supportedTypes.includes("SHADER")) {
+              depContentType = "SHADER"
+            } else if (manualDepOverride.contentType) {
+              depContentType = manualDepOverride.contentType
+            } else if (supportedTypes.length === 1) {
+              depContentType = supportedTypes[0]!
+            }
+          }
+
+          if (!depContentType) {
+            const reason = manualVersionObj
+              ? `No se pudo determinar el tipo de contenido para la versión seleccionada manualmente "${manualVersionObj.versionNumber || manualDepOverride.versionId}" de "${dep.projectName || depProjectId}".`
+              : `No se pudo encontrar la versión seleccionada manualmente "${manualDepOverride.versionId}" para la dependencia "${dep.projectName || depProjectId}".`
+            warnings.push(reason)
+            let allVers: NormalizedModVersion[] = []
+            if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+              allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
+            }
+            unresolvedDependencies.push({
+              provider: current.provider,
+              projectId: depProjectId,
+              versionId: manualDepOverride.versionId,
+              projectName: dep.projectName || null,
+              contentType: null,
+              reason,
+              allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
             })
-            if (candidateTypes.length === 1) {
-              depContentType = candidateTypes[0]!
+            continue
+          }
+        }
+
+        if (!depContentType) {
+          if (pinnedVersionObj) {
+            const vLoaders = (pinnedVersionObj.loaders || []).map((l) => l.toLowerCase())
+            if (vLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))) {
+              depContentType = "MOD"
+            } else if (vLoaders.includes("datapack")) {
+              depContentType = "DATA_PACK"
+            } else if (vLoaders.includes("minecraft") && supportedTypes.includes("RESOURCE_PACK")) {
+              depContentType = "RESOURCE_PACK"
+            } else if (
+              supportedTypes.includes("SHADER") &&
+              !supportedTypes.includes("MOD") &&
+              !supportedTypes.includes("RESOURCE_PACK") &&
+              !supportedTypes.includes("DATA_PACK")
+            ) {
+              depContentType = "SHADER"
+            } else if (supportedTypes.length === 1) {
+              depContentType = supportedTypes[0]!
+            } else if (supportedTypes.length > 1) {
+              // Cross supported types with version metadata
+              const candidateTypes = supportedTypes.filter((t) => {
+                if (t === "MOD") return vLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))
+                if (t === "DATA_PACK") return vLoaders.includes("datapack")
+                if (t === "RESOURCE_PACK") return vLoaders.includes("minecraft")
+                if (t === "SHADER") return true
+                return false
+              })
+              if (candidateTypes.length === 1) {
+                depContentType = candidateTypes[0]!
+              } else {
+                const reason = `La versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" es de tipo indeterminable o ambigua (tipos compatibles posibles: ${candidateTypes.join(", ")}).`
+                warnings.push(reason)
+                let allVers: NormalizedModVersion[] = []
+                if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+                  allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
+                }
+                unresolvedDependencies.push({
+                  provider: current.provider,
+                  projectId: depProjectId,
+                  versionId: pinnedId ? String(pinnedId) : null,
+                  projectName: dep.projectName || null,
+                  contentType: null,
+                  reason,
+                  allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
+                })
+                continue
+              }
             } else {
-              const reason = `La versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" es de tipo indeterminable o ambigua (tipos compatibles posibles: ${candidateTypes.join(", ")}).`
+              const reason = `No se pudo determinar el tipo de contenido para la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}".`
               warnings.push(reason)
               let allVers: NormalizedModVersion[] = []
               if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
@@ -2089,61 +2164,44 @@ export class ModProviderManager {
               continue
             }
           } else {
-            const reason = `No se pudo determinar el tipo de contenido para la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}".`
-            warnings.push(reason)
-            let allVers: NormalizedModVersion[] = []
-            if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
-              allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
+            // No pinned version (only projectId)
+            if (supportedTypes.length === 1) {
+              depContentType = supportedTypes[0]!
+            } else if (supportedTypes.length > 1) {
+              const reason = `La dependencia "${dep.projectName || depProjectId}" es multi-tipo y ambigua (soporta ${supportedTypes.join(", ")}); se requiere especificar versión o resolver manualmente.`
+              warnings.push(reason)
+              let allVers: NormalizedModVersion[] = []
+              if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+                allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
+              }
+              unresolvedDependencies.push({
+                provider: current.provider,
+                projectId: depProjectId,
+                versionId: null,
+                projectName: dep.projectName || null,
+                contentType: null,
+                reason,
+                allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
+              })
+              continue
+            } else {
+              const reason = `La dependencia "${dep.projectName || depProjectId}" tiene un tipo de contenido desconocido o no soportado.`
+              warnings.push(reason)
+              let allVers: NormalizedModVersion[] = []
+              if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+                allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
+              }
+              unresolvedDependencies.push({
+                provider: current.provider,
+                projectId: depProjectId,
+                versionId: null,
+                projectName: dep.projectName || null,
+                contentType: null,
+                reason,
+                allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
+              })
+              continue
             }
-            unresolvedDependencies.push({
-              provider: current.provider,
-              projectId: depProjectId,
-              versionId: pinnedId ? String(pinnedId) : null,
-              projectName: dep.projectName || null,
-              contentType: null,
-              reason,
-              allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
-            })
-            continue
-          }
-        } else {
-          // No pinned version (only projectId)
-          if (supportedTypes.length === 1) {
-            depContentType = supportedTypes[0]!
-          } else if (supportedTypes.length > 1) {
-            const reason = `La dependencia "${dep.projectName || depProjectId}" es multi-tipo y ambigua (soporta ${supportedTypes.join(", ")}); se requiere especificar versión o resolver manualmente.`
-            warnings.push(reason)
-            let allVers: NormalizedModVersion[] = []
-            if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
-              allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
-            }
-            unresolvedDependencies.push({
-              provider: current.provider,
-              projectId: depProjectId,
-              versionId: null,
-              projectName: dep.projectName || null,
-              contentType: null,
-              reason,
-              allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
-            })
-            continue
-          } else {
-            const reason = `La dependencia "${dep.projectName || depProjectId}" tiene un tipo de contenido desconocido o no soportado.`
-            warnings.push(reason)
-            let allVers: NormalizedModVersion[] = []
-            if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
-              allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
-            }
-            unresolvedDependencies.push({
-              provider: current.provider,
-              projectId: depProjectId,
-              versionId: null,
-              projectName: dep.projectName || null,
-              contentType: null,
-              reason,
-              allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
-            })
-            continue
           }
         }
 
@@ -2263,9 +2321,13 @@ export class ModProviderManager {
             (v) => v.id === overrideVersionId || v.fileId === overrideVersionId,
           )
           if (!selectedDepVersion) {
-            const forcedVer = await depAdapter
-              .getVersion(env, overrideVersionId, depProjectId, depContentType)
-              .catch(() => null)
+            const forcedVer =
+              manualVersionObj &&
+              (manualVersionObj.id === overrideVersionId || manualVersionObj.fileId === overrideVersionId)
+                ? manualVersionObj
+                : await depAdapter
+                    .getVersion(env, overrideVersionId, depProjectId, depContentType)
+                    .catch(() => null)
             if (forcedVer) {
               selectedDepVersion = forcedVer
               warnings.push(

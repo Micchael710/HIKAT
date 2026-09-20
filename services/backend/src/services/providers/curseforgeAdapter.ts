@@ -423,6 +423,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     const pageSize = 50
     let index = 0
     let totalCount = Infinity
+    let lastPageIdentity: string | null = null
     const versions: NormalizedModVersion[] = []
 
     while (index < totalCount) {
@@ -460,6 +461,12 @@ export class CurseForgeAdapter implements ModProviderAdapter {
         if (files.length === 0) {
           break
         }
+
+        const currentPageIdentity = `${files[0]?.id}:${files[files.length - 1]?.id}`
+        if (lastPageIdentity !== null && currentPageIdentity === lastPageIdentity) {
+          break
+        }
+        lastPageIdentity = currentPageIdentity
 
         for (const file of files) {
           const v = await this.mapCurseForgeFile(env, projectId, file, "", contentType, false)
