@@ -33,9 +33,9 @@ export const CommunitySection: React.FC<CommunitySectionProps> = ({ content }) =
         backgroundPosition: "center",
       }}
     >
-      {/* Dark background gradient overlays for contrast */}
-      <div className="absolute inset-0 bg-[#0e151b]/85 backdrop-blur-sm pointer-events-none" />
-      <div className="absolute inset-0 bg-gradient-to-t from-[#090d12] via-[#0e151b]/80 to-transparent pointer-events-none" />
+      {/* Directional gradient overlay: dark on left for text legibility, clear on right to showcase artwork */}
+      <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/95 via-[#090d12]/65 to-[#090d12]/20 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-t from-[#090d12]/90 via-[#090d12]/30 to-transparent pointer-events-none" />
 
       {/* Main Content */}
       <div className="relative z-10 space-y-6">
@@ -49,10 +49,10 @@ export const CommunitySection: React.FC<CommunitySectionProps> = ({ content }) =
 
         {/* Heading & Description */}
         <div className="space-y-3">
-          <h3 className="text-3xl sm:text-4xl font-black tracking-tight text-white">
+          <h3 className="text-3xl sm:text-4xl font-black tracking-tight text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]">
             {content.title}
           </h3>
-          <p className="text-xs sm:text-sm text-[#8899aa] leading-relaxed max-w-lg">
+          <p className="text-xs sm:text-sm text-[#8899aa] leading-relaxed max-w-lg drop-shadow-[0_1px_6px_rgba(0,0,0,0.8)] font-normal">
             {content.description}
           </p>
         </div>
@@ -76,10 +76,10 @@ export const CommunitySection: React.FC<CommunitySectionProps> = ({ content }) =
         {content.benefits.map((benefit: CommunityBenefit) => (
           <div
             key={benefit.id}
-            className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-[#090d12]/60 border border-white/[0.08] backdrop-blur-md"
+            className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-[#090d12]/75 border border-white/[0.1] backdrop-blur-md shadow-sm"
           >
             <span className="flex-shrink-0">{getBenefitIcon(benefit.icon)}</span>
-            <span className="text-xs font-semibold text-white/90 leading-tight">
+            <span className="text-xs font-semibold text-white/95 leading-tight">
               {benefit.label}
             </span>
           </div>

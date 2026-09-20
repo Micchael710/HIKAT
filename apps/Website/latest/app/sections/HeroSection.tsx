@@ -1,8 +1,9 @@
 import React from "react";
-import type { HeroContent, HeroCard as HeroCardType } from "../content/types";
+import type { HeroContent, HeroCard as HeroCardType, HeaderContent } from "../content/types";
 import { Container } from "../components/ui/Container";
 import { ButtonLink } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { Header } from "../components/layout/Header";
 import {
   IconDownload,
   IconPlay,
@@ -13,6 +14,7 @@ import {
 
 export interface HeroSectionProps {
   content: HeroContent;
+  headerContent: HeaderContent;
 }
 
 const HeroCardItem: React.FC<{ card: HeroCardType }> = ({ card }) => {
@@ -69,11 +71,11 @@ const HeroCardItem: React.FC<{ card: HeroCardType }> = ({ card }) => {
   );
 };
 
-export const HeroSection: React.FC<HeroSectionProps> = ({ content }) => {
+export const HeroSection: React.FC<HeroSectionProps> = ({ content, headerContent }) => {
   return (
     <section
       id="hero"
-      className="relative min-h-[95vh] lg:min-h-screen flex flex-col justify-between pt-28 sm:pt-36 pb-10 overflow-hidden"
+      className="relative min-h-[95vh] lg:min-h-screen flex flex-col justify-between pb-8 overflow-hidden"
       style={{
         backgroundImage: `url(${content.backgroundImage})`,
         backgroundSize: "cover",
@@ -86,9 +88,14 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content }) => {
       <div className="absolute inset-0 bg-gradient-to-t from-[#090d12] via-[#090d12]/40 to-transparent pointer-events-none" />
       <div className="absolute inset-0 bg-radial from-transparent via-[#090d12]/30 to-[#090d12]/90 pointer-events-none" />
 
+      {/* Top Floating Glass Header (Stays in Hero, naturally scrolls away) */}
+      <div className="relative z-20">
+        <Header content={headerContent} />
+      </div>
+
       {/* Main Hero Content */}
-      <Container className="relative z-10 my-auto">
-        <div className="max-w-2xl lg:max-w-3xl space-y-6 pt-4 sm:pt-8">
+      <Container className="relative z-10 my-auto pt-10 sm:pt-14 pb-8">
+        <div className="max-w-2xl lg:max-w-3xl space-y-6">
           {/* Server Identity / Logo */}
           <div className="flex items-center gap-4">
             {content.serverLogoUrl ? (
@@ -140,33 +147,24 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ content }) => {
         </div>
       </Container>
 
-      {/* Bottom Hero Cards & Tickers */}
-      <Container className="relative z-10 mt-12 sm:mt-16">
+      {/* Bottom Hero Cards & Centered Scroll Indicator */}
+      <Container className="relative z-10 mt-6 sm:mt-10">
         {/* 3 Bottom Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6 mb-6">
           {content.cards.map((card) => (
             <HeroCardItem key={card.id} card={card} />
           ))}
         </div>
 
-        {/* Ticker & Scroll Indicator */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-white/[0.06] text-xs text-[#657788] font-semibold tracking-wider select-none">
-          <div className="flex items-center gap-2">
-            {content.tickerLeft.map((word, idx) => (
-              <React.Fragment key={word}>
-                <span>{word}</span>
-                {idx < content.tickerLeft.length - 1 && <span>·</span>}
-              </React.Fragment>
-            ))}
-          </div>
-
-          <div className="flex flex-col items-center gap-1 text-[#8899aa]">
-            <IconMouseScroll size={20} />
-          </div>
-
-          <div className="uppercase tracking-widest text-[#657788]">
-            {content.tickerRight}
-          </div>
+        {/* Centered Scroll Indicator (No side text banners) */}
+        <div className="flex items-center justify-center pt-2 text-[#8899aa] select-none">
+          <a
+            href="#aventura"
+            aria-label="Desplazarse hacia abajo"
+            className="flex flex-col items-center gap-1 hover:text-white transition-colors"
+          >
+            <IconMouseScroll size={22} />
+          </a>
         </div>
       </Container>
     </section>

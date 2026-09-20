@@ -40,8 +40,6 @@ export interface HeroContent {
     href: string;
   };
   cards: HeroCard[];
-  tickerLeft: string[];
-  tickerRight: string;
 }
 
 export interface JourneyStep {

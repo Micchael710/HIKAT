@@ -56,8 +56,6 @@ export const previewWebsiteContent: WebsiteContent = {
         href: "#servidor",
       },
     ],
-    tickerLeft: ["EXPLORA", "CREA", "SOBREVIVE", "PROGRESA"],
-    tickerRight: "MÁS QUE UN SERVIDOR, UNA COMUNIDAD",
   },
   journey: {
     eyebrow: "CONSTRUYE SIN LÍMITES",

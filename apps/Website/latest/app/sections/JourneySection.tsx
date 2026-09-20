@@ -46,7 +46,7 @@ const JourneyStepCard: React.FC<{ step: JourneyStepType }> = ({ step }) => {
 
 export const JourneySection: React.FC<JourneySectionProps> = ({ content }) => {
   return (
-    <section id="aventura" className="relative py-16 sm:py-24 overflow-hidden">
+    <section id="aventura" className="relative pt-10 sm:pt-14 pb-4 sm:pb-6 overflow-hidden">
       {/* Subtle atmospheric background gradient */}
       <div className="absolute top-0 right-0 w-1/2 h-full bg-radial from-orange-500/[0.04] via-transparent to-transparent pointer-events-none" />
 
@@ -56,15 +56,16 @@ export const JourneySection: React.FC<JourneySectionProps> = ({ content }) => {
           eyebrow={content.eyebrow}
           title={content.title}
           description={content.description}
+          className="!mb-6"
         />
 
         {/* Steps Sequence */}
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-4 mt-8">
+        <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-4 mt-6">
           {content.steps.map((step, index) => (
             <React.Fragment key={step.order}>
               <JourneyStepCard step={step} />
 
-              {/* Connecting arrow separator (hidden on mobile, visible on desktop) */}
+              {/* Connecting arrow separator */}
               {index < content.steps.length - 1 && (
                 <div
                   className="hidden lg:flex items-center justify-center flex-shrink-0"

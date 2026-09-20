@@ -14,15 +14,15 @@ const SecondaryFeatureCard: React.FC<{ item: FeatureItemType }> = ({ item }) => 
   return (
     <Card
       interactive
-      className="p-4 sm:p-5 flex items-center justify-between gap-4 group"
+      className="p-5 sm:p-6 flex items-center justify-between gap-5 group flex-1"
       onClick={() => {
         if (item.href) {
           window.location.href = item.href;
         }
       }}
     >
-      <div className="flex items-center gap-4 min-w-0">
-        <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-[#090d12] flex-shrink-0 border border-white/[0.08] p-1 flex items-center justify-center">
+      <div className="flex items-center gap-4 sm:gap-5 min-w-0">
+        <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden bg-[#090d12] flex-shrink-0 border border-white/[0.08] p-2 flex items-center justify-center">
           <img
             src={item.imageUrl}
             alt={item.title}
@@ -36,7 +36,7 @@ const SecondaryFeatureCard: React.FC<{ item: FeatureItemType }> = ({ item }) => 
           <h4 className="text-base sm:text-lg font-bold text-white tracking-tight group-hover:text-white transition-colors truncate">
             {item.title}
           </h4>
-          <p className="text-xs sm:text-sm text-[#8899aa] leading-snug line-clamp-2 mt-1">
+          <p className="text-xs sm:text-sm text-[#8899aa] leading-relaxed line-clamp-2 mt-1">
             {item.description}
           </p>
         </div>
@@ -44,7 +44,7 @@ const SecondaryFeatureCard: React.FC<{ item: FeatureItemType }> = ({ item }) => 
 
       <div className="flex-shrink-0">
         <span
-          className="btn-circle-arrow w-9 h-9 group-hover:bg-white/20 group-hover:border-white/40"
+          className="btn-circle-arrow w-10 h-10 group-hover:bg-white/20 group-hover:border-white/40"
           aria-hidden="true"
         >
           <IconArrowRight size={16} />
@@ -58,30 +58,31 @@ export const FeaturesSection: React.FC<FeaturesSectionProps> = ({ content }) => 
   const { featured, secondaryItems } = content;
 
   return (
-    <section id="features" className="py-16 sm:py-24">
+    <section id="features" className="pt-10 sm:pt-14 pb-16 sm:pb-24">
       <Container>
-        {/* Section Heading with View All CTA */}
+        {/* Section Heading with seamlessly aligned View All CTA */}
         <SectionHeading
           title={content.title}
           description={content.description}
           action={content.viewAllAction}
+          className="!mb-8"
         />
 
-        {/* 2-Column Split: Large Featured Card on Left, 3 Stacked Cards on Right */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-8">
-          {/* Featured Large Card */}
-          <div className="lg:col-span-7">
+        {/* 2-Column Split: Dominant Featured Card on Left (7 cols), 3 Stacked Secondary Cards on Right (5 cols) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+          {/* Featured Dominant Card */}
+          <div className="lg:col-span-7 flex">
             <Card
-              className="relative h-full min-h-[460px] p-6 sm:p-10 flex flex-col justify-end overflow-hidden"
+              className="relative w-full min-h-[520px] sm:min-h-[560px] p-8 sm:p-12 flex flex-col justify-end overflow-hidden"
               style={{
                 backgroundImage: `url(${featured.backgroundImage})`,
                 backgroundSize: "cover",
                 backgroundPosition: "center 40%",
               }}
             >
-              {/* Launcher gradient overlays */}
+              {/* Vignette and text protection gradients */}
               <div className="absolute inset-0 bg-gradient-to-t from-[#090d12] via-[#090d12]/60 to-transparent pointer-events-none" />
-              <div className="absolute inset-0 bg-radial from-transparent to-[#090d12]/40 pointer-events-none" />
+              <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/80 via-transparent to-transparent pointer-events-none" />
 
               {/* Bottom text & CTA */}
               <div className="relative z-10 space-y-4 max-w-xl">
@@ -100,11 +101,11 @@ export const FeaturesSection: React.FC<FeaturesSectionProps> = ({ content }) => 
                   </span>
                 )}
 
-                <h3 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight leading-tight">
+                <h3 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight leading-tight drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">
                   {featured.title}
                 </h3>
 
-                <p className="text-xs sm:text-sm text-[#8899aa] leading-relaxed">
+                <p className="text-xs sm:text-sm text-[#8899aa] leading-relaxed font-normal">
                   {featured.description}
                 </p>
 
@@ -113,7 +114,7 @@ export const FeaturesSection: React.FC<FeaturesSectionProps> = ({ content }) => 
                     variant="primary"
                     href={featured.ctaAction.href}
                     icon={<IconDownload size={18} />}
-                    className="!px-6 !py-3 !text-sm !rounded-xl"
+                    className="!px-7 !py-3.5 !text-sm !rounded-xl"
                   >
                     {featured.ctaAction.label}
                   </ButtonLink>
