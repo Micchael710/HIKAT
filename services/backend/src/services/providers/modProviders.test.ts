@@ -4771,14 +4771,14 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         return { ok: false, status: 404 }
       })
 
-      // We spy on adapter.getProject to simulate that dependency 999222 has known environment "BOTH"
-      const origGetProject = (manager as any).curseforge.getProject.bind((manager as any).curseforge)
-      vi.spyOn((manager as any).curseforge, "getProject").mockImplementation((async (env: any, id: any, ct: any) => {
-        const res = await origGetProject(env, id, ct)
-        if (id === "999222") {
-          return { ...res, environment: "BOTH" }
+      // We spy on adapter.getCompatibleVersions to simulate that dependency 999222 has known authoritative VERSION environment "BOTH"
+      const origGetCompVersions = (manager as any).curseforge.getCompatibleVersions.bind((manager as any).curseforge)
+      vi.spyOn((manager as any).curseforge, "getCompatibleVersions").mockImplementation((async (env: any, pid: any, mc: any, l: any, ct: any) => {
+        const list = await origGetCompVersions(env, pid, mc, l, ct)
+        if (pid === "999222") {
+          return list.map((v: any) => ({ ...v, environment: "BOTH" }))
         }
-        return res
+        return list
       }) as any)
 
       const plan = await manager.resolveInstallationPlan(
@@ -7257,6 +7257,170 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         .get()
 
       expect(updatedRow?.sourceEnvironment).toBe("BOTH")
+    })
+
+    it("Modrinth dependency environment uses version.environment without falling back to project.environment", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-mod-env/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-root-env-1",
+                project_id: "root-mod-env",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_only", // CLIENT
+                files: [
+                  {
+                    filename: "root-mod-env.jar",
+                    size: 1000,
+                    url: "https://cdn/root-mod-env.jar",
+                    primary: true,
+                    hashes: { sha512: "sha512root" },
+                  },
+                ],
+                dependencies: [
+                  { project_id: "dep-mod-env", dependency_type: "required" },
+                ],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-mod-env")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-mod-env", title: "Root Mod Env", project_type: "mod" }) }
+        }
+        if (u.includes("/project/dep-mod-env/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-dep-env-1",
+                project_id: "dep-mod-env",
+                version_number: "2.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: null, // UNKNOWN at version level
+                files: [
+                  {
+                    filename: "dep-mod-env.jar",
+                    size: 2000,
+                    url: "https://cdn/dep-mod-env.jar",
+                    primary: true,
+                    hashes: { sha512: "sha512dep" },
+                  },
+                ],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/dep-mod-env")) {
+          // Project claims server_only, but Version is authoritative and project.environment should NOT be used as fallback
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "dep-mod-env",
+              title: "Dep Mod Env",
+              project_type: "mod",
+              client_side: "unsupported",
+              server_side: "required", // would map to SERVER if project fallback existed
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-mod-env",
+        versionId: "v-root-env-1",
+        contentType: "MOD",
+      })
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items).toHaveLength(2)
+
+      const rootItem = plan.items.find((i) => i.projectId === "root-mod-env")
+      const depItem = plan.items.find((i) => i.projectId === "dep-mod-env")
+
+      expect(rootItem?.environment).toBe("CLIENT")
+      // Dependency version environment was null/unknown -> inherits rootEnv (CLIENT), does NOT use project environment (SERVER)
+      expect(depItem?.environment).toBe("CLIENT")
+    })
+
+    it("handles Modrinth external dependency with only file_name without blocking root", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-ext-dep/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-ext-1",
+                project_id: "root-ext-dep",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_and_server", // BOTH
+                files: [
+                  {
+                    filename: "root-ext-dep.jar",
+                    size: 1500,
+                    url: "https://cdn/root-ext-dep.jar",
+                    primary: true,
+                    hashes: { sha512: "sha512ext" },
+                  },
+                ],
+                dependencies: [
+                  {
+                    project_id: null,
+                    version_id: null,
+                    file_name: "OptiFine_1.21.1_HD_U_I1.jar",
+                    dependency_type: "required",
+                  },
+                  {
+                    project_id: null,
+                    version_id: null,
+                    file_name: "OptionalTool.jar",
+                    dependency_type: "optional",
+                  },
+                ],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-ext-dep")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-ext-dep", title: "Root Ext Dep", project_type: "mod" }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-ext-dep",
+        versionId: "v-ext-1",
+        contentType: "MOD",
+      })
+
+      // Must NOT block root
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts).toHaveLength(0)
+      expect(plan.items).toHaveLength(1)
+      expect(plan.items[0]!.projectId).toBe("root-ext-dep")
+
+      // External required dependency is flagged in unresolvedDependencies and warnings
+      expect(plan.unresolvedDependencies).toHaveLength(1)
+      expect(plan.unresolvedDependencies[0]!.projectName).toBe("OptiFine_1.21.1_HD_U_I1.jar")
+      expect(plan.unresolvedDependencies[0]!.projectId).toBeNull()
+      expect(plan.unresolvedDependencies[0]!.versionId).toBeNull()
+      expect(plan.warnings.some((w) => w.includes("OptiFine_1.21.1_HD_U_I1.jar"))).toBe(true)
     })
   })
 })

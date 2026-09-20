@@ -1963,7 +1963,22 @@ export class ModProviderManager {
       const currentDeps = current.version.dependencies || []
 
       for (const dep of currentDeps) {
-        if (!dep.projectId && !dep.versionId) continue
+        if (!dep.projectId && !dep.versionId) {
+          if (dep.fileName && dep.dependencyType === "REQUIRED") {
+            const reason = `Dependencia requerida externa "${dep.fileName}" no está disponible en el proveedor.`
+            warnings.push(reason)
+            unresolvedDependencies.push({
+              provider: current.provider,
+              projectId: null,
+              versionId: null,
+              projectName: dep.fileName,
+              contentType: null,
+              reason,
+              allVersions: [],
+            })
+          }
+          continue
+        }
 
         // A. Accumulate INCOMPATIBLE restrictions
         if (dep.dependencyType === "INCOMPATIBLE") {
@@ -2404,8 +2419,6 @@ export class ModProviderManager {
         let depEnv: ModEnvironmentGql | null = null
         if (isKnownEnvironment(selectedDepVersion.environment)) {
           depEnv = selectedDepVersion.environment
-        } else if (isKnownEnvironment(depProject?.environment)) {
-          depEnv = depProject.environment
         } else if (isKnownEnvironment(rootEnv)) {
           depEnv = rootEnv
         }
