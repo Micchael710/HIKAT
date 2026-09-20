@@ -55,6 +55,10 @@ export interface JourneyContent {
   sectionBackgroundPosition?: string;
   sectionFocusPosition?: string;
   sectionFocusSize?: string;
+  sectionFocusScale?: number | string;
+  sectionFocusTranslateX?: string;
+  sectionFocusTranslateY?: string;
+  sectionFocusMask?: string;
   eyebrow: string;
   title: string;
   description: string;

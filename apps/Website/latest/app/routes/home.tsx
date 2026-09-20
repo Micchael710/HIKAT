@@ -54,31 +54,41 @@ export default function Home() {
             <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/98 via-[#090d12]/75 via-50% to-[#090d12]/30" />
             <div className="absolute inset-0 bg-radial from-transparent via-[#090d12]/20 to-[#090d12]/80" />
 
-            {/* CAPA 2: Sharp HiKAT building, gear, banners & character detail in top-right (Image 4 composition) */}
+            {/* CAPA 2: Sharp HiKAT building, gear, banners & character detail in top-right (Image 3 reference) */}
             {content.journey.sectionBackgroundImage && (
               <div
-                className="absolute inset-0 pointer-events-none overflow-hidden"
+                className="absolute top-0 right-0 w-full sm:w-[90%] md:w-[80%] lg:w-[70%] xl:w-[62%] h-[480px] sm:h-[540px] md:h-[600px] lg:h-[660px] pointer-events-none overflow-hidden"
                 style={{
                   maskImage:
-                    "radial-gradient(ellipse 58% 52% at 82% 24%, black 25%, rgba(0,0,0,0.85) 50%, rgba(0,0,0,0.2) 70%, transparent 88%)",
+                    content.journey.sectionFocusMask ||
+                    "radial-gradient(ellipse 75% 70% at 70% 36%, black 30%, rgba(0,0,0,0.85) 55%, rgba(0,0,0,0.2) 75%, transparent 92%)",
                   WebkitMaskImage:
-                    "radial-gradient(ellipse 58% 52% at 82% 24%, black 25%, rgba(0,0,0,0.85) 50%, rgba(0,0,0,0.2) 70%, transparent 88%)",
+                    content.journey.sectionFocusMask ||
+                    "radial-gradient(ellipse 75% 70% at 70% 36%, black 30%, rgba(0,0,0,0.85) 55%, rgba(0,0,0,0.2) 75%, transparent 92%)",
                 }}
               >
                 <div
-                  className="absolute inset-0 bg-cover bg-no-repeat opacity-95 transition-all"
+                  className="w-full h-full bg-no-repeat opacity-95 transition-all"
                   style={{
                     backgroundImage: `url(${content.journey.sectionBackgroundImage})`,
                     backgroundPosition:
                       content.journey.sectionFocusPosition ||
                       content.journey.sectionBackgroundPosition ||
-                      "right 5% top",
+                      "right 6% top",
                     backgroundSize: content.journey.sectionFocusSize || "cover",
+                    transform:
+                      content.journey.sectionFocusScale ||
+                      content.journey.sectionFocusTranslateX ||
+                      content.journey.sectionFocusTranslateY
+                        ? `scale(${content.journey.sectionFocusScale || 1}) translate(${
+                            content.journey.sectionFocusTranslateX || "0px"
+                          }, ${content.journey.sectionFocusTranslateY || "0px"})`
+                        : undefined,
                   }}
                 />
                 {/* Smooth progressive feathering overlays on left and bottom edges */}
-                <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/95 via-[#090d12]/35 via-35% to-transparent" />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#090d12] via-transparent via-55% to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-r from-[#090d12]/95 via-[#090d12]/30 via-30% to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#090d12] via-transparent via-50% to-transparent" />
               </div>
             )}
 
