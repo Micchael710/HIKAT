@@ -51,6 +51,7 @@ export interface JourneyStep {
 }
 
 export interface JourneyContent {
+  sectionBackgroundImage?: string;
   eyebrow: string;
   title: string;
   description: string;

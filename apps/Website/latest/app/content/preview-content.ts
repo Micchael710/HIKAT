@@ -28,7 +28,7 @@ export const previewWebsiteContent: WebsiteContent = {
     },
     secondaryCta: {
       label: "Ver más",
-      href: "#aventura",
+      href: "#novedades",
     },
     cards: [
       {
@@ -58,6 +58,7 @@ export const previewWebsiteContent: WebsiteContent = {
     ],
   },
   journey: {
+    sectionBackgroundImage: "/assets/backgrounds/login-bg.png",
     eyebrow: "CONSTRUYE SIN LÍMITES",
     title: "Comienza tu aventura",
     description:
