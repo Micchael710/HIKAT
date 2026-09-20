@@ -955,6 +955,7 @@ export interface ModProjectVersionGql {
   sizeBytes: number
   sha256?: string | null
   dependencies: ModDependencyGql[]
+  environment?: ModEnvironmentGql | null
 }
 
 export interface ModProjectDetailGql {

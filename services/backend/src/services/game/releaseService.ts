@@ -211,8 +211,9 @@ export function computeDraftChanges(
       const baseEffective = publishedEffectiveMap.get(base.id) || "NO_MODIFICABLE"
       const contentChanged = base.sha256 !== df.sha256 || base.sizeBytes !== df.sizeBytes
       const policyChanged = baseEffective !== draftEffective || base.policy !== df.policy
+      const envChanged = (base.sourceEnvironment || null) !== (df.sourceEnvironment || null)
 
-      if (contentChanged || policyChanged) {
+      if (contentChanged || policyChanged || envChanged) {
         changeStatus = "UPDATED"
         if (!df.isDirectory) updated++
       } else {

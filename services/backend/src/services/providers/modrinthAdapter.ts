@@ -568,23 +568,27 @@ export class ModrinthAdapter implements ModProviderAdapter {
         ? "ALPHA"
         : "RELEASE"
 
-    const dependencies: NormalizedModDependency[] = (raw.dependencies || []).map(
-      (d: any) => {
-        let depType: ModDependencyTypeGql = "REQUIRED"
-        if (d.dependency_type === "optional") depType = "OPTIONAL"
-        else if (d.dependency_type === "incompatible") depType = "INCOMPATIBLE"
-        else if (d.dependency_type === "embedded") depType = "EMBEDDED"
+    const dependencies: NormalizedModDependency[] = []
+    for (const d of raw.dependencies || []) {
+      if (d.dependency_type === "embedded") {
+        continue // Already bundled in the artifact, omit completely
+      }
+      let depType: ModDependencyTypeGql | null = null
+      if (d.dependency_type === "required") depType = "REQUIRED"
+      else if (d.dependency_type === "optional") depType = "OPTIONAL"
+      else if (d.dependency_type === "incompatible") depType = "INCOMPATIBLE"
 
-        return {
-          projectId: d.project_id || null,
-          versionId: d.version_id || null,
-          fileId: null,
-          dependencyType: depType,
-          projectName: d.project_name || d.title || null,
-          fileName: d.file_name || null,
-        }
-      },
-    )
+      if (!depType) continue
+
+      dependencies.push({
+        projectId: d.project_id || null,
+        versionId: d.version_id || null,
+        fileId: null,
+        dependencyType: depType,
+        projectName: d.project_name || d.title || null,
+        fileName: d.file_name || null,
+      })
+    }
 
     const rawLoaders = raw.loaders || []
     const loaders = rawLoaders.map((l: string) => {
@@ -610,6 +614,27 @@ export class ModrinthAdapter implements ModProviderAdapter {
     }
 
     const hashes = primaryFile.hashes || {}
+    const rawEnv = (raw.environment || "").trim().toLowerCase()
+    let versionEnv: ModEnvironmentGql = "UNKNOWN"
+    if (
+      rawEnv === "client_and_server" ||
+      rawEnv === "client_or_server_prefers_both" ||
+      rawEnv === "client_or_server"
+    ) {
+      versionEnv = "BOTH"
+    } else if (
+      rawEnv === "client_only" ||
+      rawEnv === "client_only_server_optional" ||
+      rawEnv === "singleplayer_only"
+    ) {
+      versionEnv = "CLIENT"
+    } else if (
+      rawEnv === "server_only" ||
+      rawEnv === "server_only_client_optional" ||
+      rawEnv === "dedicated_server_only"
+    ) {
+      versionEnv = "SERVER"
+    }
 
     return {
       id: raw.id,
@@ -631,7 +656,7 @@ export class ModrinthAdapter implements ModProviderAdapter {
       },
       downloadUrl: primaryFile.url,
       contentType: versionContentType,
-      environment: null,
+      environment: versionEnv,
       dependencies,
     }
   }

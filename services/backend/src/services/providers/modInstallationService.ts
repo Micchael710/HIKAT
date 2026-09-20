@@ -717,35 +717,15 @@ export async function installModPlansBatch(
   }
 
   try {
-    // 5. Transfer provider binaries with max concurrency 2 directly into R2 multipart (10 MiB min part size)
-    const downloadedItems: Array<{
+    // 5. Separate items needing binary download from metadata-only updates (same version already in draft)
+    const itemsNeedingDownload: ModInstallationPlanItemGql[] = []
+    const itemsMetadataOnly: Array<{
       item: ModInstallationPlanItemGql
-      filename: string
-      sizeBytes: number
-      sha256: string
-      objectKey: string
+      existing: schema.GameReleaseFile
       category: GameFileCategoryGql
     }> = []
 
-    await runWithConcurrency(deduplicatedItems, 2, async (item) => {
-      const adapter = modProviderManager.getAdapter(item.provider)
-      const versionObj = await adapter.getVersion(
-        env,
-        item.versionId,
-        item.projectId,
-        item.contentType,
-      )
-
-      const downloadUrl = versionObj?.downloadUrl || ""
-      const filename = versionObj?.filename || item.filename
-
-      if (!downloadUrl) {
-        throw createGraphQLError(
-          `El autor de este archivo en ${item.provider} ha deshabilitado la descarga directa de terceros.`,
-          "VALIDATION_ERROR",
-        )
-      }
-
+    for (const item of deduplicatedItems) {
       const validationCategory: GameFileCategoryGql =
         item.contentType === "SHADER"
           ? "SHADER_PACK"
@@ -755,57 +735,119 @@ export async function installModPlansBatch(
               ? "DATA_PACK"
               : "MOD"
 
-      const objectKey = serverId
-        ? `games/${serverId}/files/${crypto.randomUUID()}`
-        : `game-files/${crypto.randomUUID()}`
-
-      const controller = new AbortController()
-      const timeoutId = setTimeout(
-        () => controller.abort(),
-        PROVIDER_DOWNLOAD_TIMEOUT_MS,
+      const existingByProvider = draftFiles.find(
+        (f) =>
+          f.sourceProvider === item.provider &&
+          f.sourceProjectId === item.projectId &&
+          f.category === validationCategory,
       )
 
-      try {
-        const response = await fetch(downloadUrl, {
-          headers: {
-            "User-Agent": "HiKAT/0.1.0 (contact@hikat.local)",
-          },
-          signal: controller.signal,
-        })
+      const isSameVersion =
+        existingByProvider &&
+        (Boolean(existingByProvider.sourceVersionId && existingByProvider.sourceVersionId === item.versionId) ||
+          Boolean(existingByProvider.sourceFileId && item.fileId && existingByProvider.sourceFileId === item.fileId))
 
-        if (!response.ok) {
+      if (existingByProvider && isSameVersion) {
+        itemsMetadataOnly.push({
+          item,
+          existing: existingByProvider,
+          category: validationCategory,
+        })
+      } else {
+        itemsNeedingDownload.push(item)
+      }
+    }
+
+    const downloadedItems: Array<{
+      item: ModInstallationPlanItemGql
+      filename: string
+      sizeBytes: number
+      sha256: string
+      objectKey: string
+      category: GameFileCategoryGql
+    }> = []
+
+    if (itemsNeedingDownload.length > 0) {
+      await runWithConcurrency(itemsNeedingDownload, 2, async (item) => {
+        const adapter = modProviderManager.getAdapter(item.provider)
+        const versionObj = await adapter.getVersion(
+          env,
+          item.versionId,
+          item.projectId,
+          item.contentType,
+        )
+
+        const downloadUrl = versionObj?.downloadUrl || ""
+        const filename = versionObj?.filename || item.filename
+
+        if (!downloadUrl) {
           throw createGraphQLError(
-            `Error ${response.status} al descargar "${item.projectName}" desde ${item.provider}.`,
+            `El autor de este archivo en ${item.provider} ha deshabilitado la descarga directa de terceros.`,
             "VALIDATION_ERROR",
           )
         }
 
-        const uploaded = await uploadProviderBinaryToR2({
-          bucket: env.ASSETS!,
-          response,
-          objectKey,
-          filename,
-          category: validationCategory,
-          provider: item.provider,
-          projectId: item.projectId,
-          versionId: item.versionId,
-          expectedSizeBytes: Number(versionObj?.sizeBytes) || 0,
-          hashes: versionObj?.hashes,
-        })
+        const validationCategory: GameFileCategoryGql =
+          item.contentType === "SHADER"
+            ? "SHADER_PACK"
+            : item.contentType === "RESOURCE_PACK"
+              ? "RESOURCE_PACK"
+              : item.contentType === "DATA_PACK"
+                ? "DATA_PACK"
+                : "MOD"
 
-        createdR2Keys.push(objectKey)
-        downloadedItems.push({
-          item,
-          filename,
-          sizeBytes: uploaded.sizeBytes,
-          sha256: uploaded.sha256,
-          objectKey,
-          category: validationCategory,
-        })
-      } finally {
-        clearTimeout(timeoutId)
-      }
-    })
+        const objectKey = serverId
+          ? `games/${serverId}/files/${crypto.randomUUID()}`
+          : `game-files/${crypto.randomUUID()}`
+
+        const controller = new AbortController()
+        const timeoutId = setTimeout(
+          () => controller.abort(),
+          PROVIDER_DOWNLOAD_TIMEOUT_MS,
+        )
+
+        try {
+          const response = await fetch(downloadUrl, {
+            headers: {
+              "User-Agent": "HiKAT/0.1.0 (contact@hikat.local)",
+            },
+            signal: controller.signal,
+          })
+
+          if (!response.ok) {
+            throw createGraphQLError(
+              `Error ${response.status} al descargar "${item.projectName}" desde ${item.provider}.`,
+              "VALIDATION_ERROR",
+            )
+          }
+
+          const uploaded = await uploadProviderBinaryToR2({
+            bucket: env.ASSETS!,
+            response,
+            objectKey,
+            filename,
+            category: validationCategory,
+            provider: item.provider,
+            projectId: item.projectId,
+            versionId: item.versionId,
+            expectedSizeBytes: Number(versionObj?.sizeBytes) || 0,
+            hashes: versionObj?.hashes,
+          })
+
+          createdR2Keys.push(objectKey)
+          downloadedItems.push({
+            item,
+            filename,
+            sizeBytes: uploaded.sizeBytes,
+            sha256: uploaded.sha256,
+            objectKey,
+            category: validationCategory,
+          })
+        } finally {
+          clearTimeout(timeoutId)
+        }
+      })
+    }
 
     // 6. Split into new and updated files, construct statements respecting parameter limits (< 100)
     const now = new Date().toISOString()
@@ -843,6 +885,28 @@ export async function installModPlansBatch(
       sourceFileId: string | null
       sourceEnvironment: string | null
     }> = []
+
+    // Add metadata-only updates directly without binary re-download
+    for (const metaItem of itemsMetadataOnly) {
+      const { item, existing, category } = metaItem
+      const defaultPolicy: SyncPolicyGql | null =
+        category === "DATA_PACK" ? "NO_MODIFICABLE" : null
+      toUpdate.push({
+        existingId: existing.id,
+        name: existing.name,
+        logicalPath: existing.logicalPath,
+        category,
+        sha256: existing.sha256,
+        sizeBytes: existing.sizeBytes,
+        policy: (existing.policy as SyncPolicyGql) || defaultPolicy,
+        objectKey: existing.objectKey,
+        sourceProvider: item.provider,
+        sourceProjectId: item.projectId,
+        sourceVersionId: item.versionId,
+        sourceFileId: item.fileId || null,
+        sourceEnvironment: item.environment || null,
+      })
+    }
 
     for (const downloaded of downloadedItems) {
       const { item, filename, sizeBytes, sha256, objectKey, category } = downloaded

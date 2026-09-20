@@ -1879,33 +1879,27 @@ export class ModProviderManager {
     }
 
     const knownRootEnv: ModEnvironmentGql | null =
-      isKnownEnvironment(rootProject?.environment)
-        ? rootProject.environment
-        : isKnownEnvironment(rootVersion.environment)
+      isKnownEnvironment(rootVersion.environment)
         ? rootVersion.environment
         : null
 
     let rootEnv: ModEnvironmentGql | null = knownRootEnv
-    if (contentType === "MOD" && !isKnownEnvironment(rootEnv)) {
-      if (
-        input.environmentOverride === "CLIENT" ||
-        input.environmentOverride === "BOTH" ||
-        input.environmentOverride === "SERVER"
-      ) {
-        rootEnv = input.environmentOverride
-      } else if (!input.environmentOverride) {
-        conflicts.push(
-          "Se requiere especificar el entorno de ejecución (Solo cliente, Cliente y servidor, o Solo servidor) para este mod.",
-        )
-      }
+    if (
+      input.environmentOverride === "CLIENT" ||
+      input.environmentOverride === "BOTH" ||
+      input.environmentOverride === "SERVER"
+    ) {
+      rootEnv = input.environmentOverride
     }
 
     const rootProjectName = rootProject?.name || rootVersion.name || "Elemento Principal"
     const rootLogicalPath = getLogicalPathForContent(contentType, rootVersion.filename)
+    const rootProjectKey = `${input.provider}:${input.projectId}`
 
-    // Add root item with 3-part identity key
-    const rootKey = `${input.provider}:${input.projectId}:${contentType}`
-    visitedBranches.add(rootKey)
+    // Visited tracks exact resolved artifacts: `${provider}:${projectId}:${versionId}`
+    const visited = new Set<string>()
+    const rootArtifactKey = `${input.provider}:${input.projectId}:${rootVersion.id}`
+    visited.add(rootArtifactKey)
 
     const targetCategory = contentType === "SHADER" ? "SHADER_PACK" : contentType
     const existingRoot = draftFiles.find(
@@ -1925,15 +1919,16 @@ export class ModProviderManager {
       const isSameVersion =
         Boolean(existingRoot.sourceVersionId && existingRoot.sourceVersionId === rootVersion.id) ||
         Boolean(existingRoot.sourceFileId && rootVersion.fileId && existingRoot.sourceFileId === rootVersion.fileId)
+      const isSameEnv = (existingRoot.sourceEnvironment || null) === (rootEnv || null)
 
-      if (isSameVersion) {
+      if (isSameVersion && isSameEnv) {
         rootAction = "ALREADY_INSTALLED"
       } else {
         rootAction = "UPDATE"
       }
     }
 
-    itemsMap.set(rootKey, {
+    itemsMap.set(rootProjectKey, {
       provider: input.provider,
       projectId: input.projectId,
       projectName: rootProjectName,
@@ -1956,7 +1951,7 @@ export class ModProviderManager {
       availableCompatibleVersions: rootCompatibleVersions as any,
     })
 
-    // 3. Recursive dependency traversal for REQUIRED dependencies
+    // 3. Single recursive dependency graph traversal
     const queue: Array<{
       provider: ModProviderGql
       version: NormalizedModVersion
@@ -1970,7 +1965,7 @@ export class ModProviderManager {
       for (const dep of currentDeps) {
         if (!dep.projectId && !dep.versionId) continue
 
-        // A. Accumulate INCOMPATIBLE restrictions (evaluated at end of traversal)
+        // A. Accumulate INCOMPATIBLE restrictions
         if (dep.dependencyType === "INCOMPATIBLE") {
           let targetProjectId = dep.projectId || ""
           const pinnedId = dep.versionId || dep.fileId || null
@@ -1992,12 +1987,67 @@ export class ModProviderManager {
           continue
         }
 
+        // B. Handle OPTIONAL dependencies (do NOT auto-install, do NOT recurse)
+        if (dep.dependencyType === "OPTIONAL") {
+          const depProjectId = dep.projectId
+          if (
+            depProjectId &&
+            !optionalDepsMap.has(`${current.provider}:${depProjectId}`) &&
+            !itemsMap.has(`${current.provider}:${depProjectId}`)
+          ) {
+            try {
+              const depAdapter = this.getAdapter(current.provider)
+              const depProj = await depAdapter.getProject(env, depProjectId).catch(() => null)
+              const depFilename = dep.fileName || "optional.jar"
+              optionalDepsMap.set(`${current.provider}:${depProjectId}`, {
+                provider: current.provider,
+                projectId: depProjectId,
+                projectName: depProj?.name || dep.projectName || "Dependencia Opcional",
+                versionId: dep.versionId || "",
+                fileId: dep.fileId || null,
+                versionNumber: "",
+                filename: depFilename,
+                sizeBytes: 0,
+                sha256: null,
+                contentType: "MOD",
+                environment: depProj?.environment || null,
+                logicalPath: getLogicalPathForContent("MOD", depFilename),
+                isRoot: false,
+                isDependency: true,
+                isRequired: false,
+                isInstalled: draftFiles.some(
+                  (f) => f.sourceProvider === current.provider && f.sourceProjectId === depProjectId,
+                ),
+                action: "ALREADY_INSTALLED",
+                installedFileId: null,
+                installedVersionNumber: null,
+                availableCompatibleVersions: [],
+              })
+            } catch {
+              // Ignore optional resolution errors
+            }
+          }
+          continue
+        }
+
+        if (dep.dependencyType !== "REQUIRED") {
+          continue
+        }
+
+        // C. REQUIRED dependencies
         const depAdapter = this.getAdapter(current.provider)
         let depProjectId = dep.projectId
         const pinnedId = dep.versionId || dep.fileId || null
-        let pinnedVersionObj: NormalizedModVersion | null = null
+
+        if (!depProjectId && pinnedId) {
+          const pinnedVer = await depAdapter.getVersion(env, pinnedId, null).catch(() => null)
+          if (pinnedVer?.projectId) {
+            depProjectId = pinnedVer.projectId
+          }
+        }
 
         // 1. If pinned versionId is given, resolve the pinned version directly first
+        let pinnedVersionObj: NormalizedModVersion | null = null
         if (pinnedId) {
           pinnedVersionObj = await depAdapter.getVersion(env, pinnedId, depProjectId).catch(() => null)
           if (!depProjectId && pinnedVersionObj?.projectId) {
@@ -2033,30 +2083,16 @@ export class ModProviderManager {
             supportedTypes = [candidate.contentType]
           }
         }
-        if (supportedTypes.length === 0) {
-          const manualOverride = input.manualOverrides?.find(
-            (o) => o.provider === current.provider && o.projectId === depProjectId && o.contentType,
-          )
-          if (manualOverride?.contentType) {
-            supportedTypes = [manualOverride.contentType]
-          }
-        }
 
-        // Check if there is an authoritative manualOverride for this dependency (provider + projectId)
         const manualDepOverride = input.manualOverrides?.find(
           (o) => o.provider === current.provider && o.projectId === depProjectId,
         )
-        let manualVersionObj: NormalizedModVersion | null = null
 
+        let manualVersionObj: NormalizedModVersion | null = null
         if (manualDepOverride?.versionId) {
           let manualFetchFailed = false
           try {
-            manualVersionObj = await depAdapter.getVersion(
-              env,
-              manualDepOverride.versionId,
-              depProjectId,
-              manualDepOverride.contentType || undefined,
-            )
+            manualVersionObj = await depAdapter.getVersion(env, manualDepOverride.versionId, depProjectId)
           } catch {
             manualFetchFailed = true
           }
@@ -2094,44 +2130,21 @@ export class ModProviderManager {
             continue
           }
 
-          const mvLoaders = (manualVersionObj.loaders || []).map((l) => l.toLowerCase())
-          if (
-            manualVersionObj.contentType === "MOD" ||
-            mvLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))
-          ) {
-            depContentType = "MOD"
-          } else if (manualVersionObj.contentType === "DATA_PACK" || mvLoaders.includes("datapack")) {
-            depContentType = "DATA_PACK"
-          } else if (
-            manualVersionObj.contentType === "RESOURCE_PACK" ||
-            (mvLoaders.includes("minecraft") && supportedTypes.includes("RESOURCE_PACK"))
-          ) {
-            depContentType = "RESOURCE_PACK"
-          } else if (manualVersionObj.contentType === "SHADER" || supportedTypes.includes("SHADER")) {
-            depContentType = "SHADER"
-          } else if (manualDepOverride.contentType) {
+          if (manualDepOverride.contentType) {
             depContentType = manualDepOverride.contentType
-          } else if (supportedTypes.length === 1) {
-            depContentType = supportedTypes[0]!
-          }
-
-          if (!depContentType) {
-            const reason = `No se pudo determinar el tipo de contenido para la versión seleccionada manualmente "${manualVersionObj.versionNumber || manualDepOverride.versionId}" de "${dep.projectName || depProjectId}".`
-            warnings.push(reason)
-            let allVers: NormalizedModVersion[] = []
-            if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
-              allVers = await depAdapter.getProjectVersions(env, depProjectId, "MOD").catch(() => [])
+          } else if (manualVersionObj.contentType) {
+            depContentType = manualVersionObj.contentType
+          } else {
+            const mLoaders = (manualVersionObj.loaders || []).map((l) => l.toLowerCase())
+            if (mLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))) {
+              depContentType = "MOD"
+            } else if (mLoaders.includes("datapack")) {
+              depContentType = "DATA_PACK"
+            } else if (mLoaders.includes("minecraft") && supportedTypes.includes("RESOURCE_PACK")) {
+              depContentType = "RESOURCE_PACK"
+            } else if (supportedTypes.length === 1) {
+              depContentType = supportedTypes[0]!
             }
-            unresolvedDependencies.push({
-              provider: current.provider,
-              projectId: depProjectId,
-              versionId: manualDepOverride.versionId,
-              projectName: dep.projectName || null,
-              contentType: null,
-              reason,
-              allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
-            })
-            continue
           }
         }
 
@@ -2154,7 +2167,6 @@ export class ModProviderManager {
             } else if (supportedTypes.length === 1) {
               depContentType = supportedTypes[0]!
             } else if (supportedTypes.length > 1) {
-              // Cross supported types with version metadata
               const candidateTypes = supportedTypes.filter((t) => {
                 if (t === "MOD") return vLoaders.some((l) => ["neoforge", "forge", "fabric", "quilt"].includes(l))
                 if (t === "DATA_PACK") return vLoaders.includes("datapack")
@@ -2201,7 +2213,6 @@ export class ModProviderManager {
               continue
             }
           } else {
-            // No pinned version (only projectId)
             if (supportedTypes.length === 1) {
               depContentType = supportedTypes[0]!
             } else if (supportedTypes.length > 1) {
@@ -2242,13 +2253,14 @@ export class ModProviderManager {
           }
         }
 
+        // Check if dep is DATA_PACK per Shard 08D rules
         if (depContentType === "DATA_PACK") {
           const reason = `La dependencia "${dep.projectName || depProjectId}" es un Data Pack y debe administrarse desde Servidor → Archivos.`
           warnings.push(reason)
           unresolvedDependencies.push({
             provider: current.provider,
             projectId: depProjectId,
-            versionId: pinnedId ? String(pinnedId) : null,
+            versionId: pinnedId || null,
             projectName: dep.projectName || null,
             contentType: "DATA_PACK",
             reason,
@@ -2257,259 +2269,153 @@ export class ModProviderManager {
           continue
         }
 
-        const depKey = `${current.provider}:${depProjectId}:${depContentType}`
+        const depProject = await depAdapter.getProject(env, depProjectId, depContentType).catch(() => null)
+        const depProjectName = depProject?.name || dep.projectName || "Dependencia"
 
-        // B. Handle OPTIONAL dependencies (do NOT automatically install)
-        if (dep.dependencyType === "OPTIONAL" || dep.dependencyType === "EMBEDDED") {
-          if (!optionalDepsMap.has(depKey) && !itemsMap.has(depKey)) {
-            try {
-              const depProj = await depAdapter.getProject(env, depProjectId, depContentType)
-              const depFilename = dep.fileName || (depContentType === "MOD" ? "optional.jar" : "optional.zip")
-              const targetCat = depContentType === "SHADER" ? "SHADER_PACK" : depContentType
-              optionalDepsMap.set(depKey, {
-                provider: current.provider,
-                projectId: depProjectId,
-                projectName: depProj?.name || dep.projectName || "Dependencia Opcional",
-                versionId: dep.versionId || "",
-                fileId: dep.fileId || null,
-                versionNumber: "",
-                filename: depFilename,
-                sizeBytes: 0,
-                sha256: null,
-                contentType: depContentType,
-                environment: depProj?.environment || null,
-                logicalPath: getLogicalPathForContent(depContentType, depFilename),
-                isRoot: false,
-                isDependency: true,
-                isRequired: false,
-                isInstalled: draftFiles.some(
-                  (f) =>
-                    f.sourceProvider === current.provider &&
-                    f.sourceProjectId === depProjectId &&
-                    f.category === targetCat,
-                ),
-                action: "ALREADY_INSTALLED",
-                installedFileId: null,
-                installedVersionNumber: null,
-                availableCompatibleVersions: [],
-              })
-            } catch {
-              // Ignore optional resolution errors
-            }
-          }
-          continue
-        }
-
-        // C. Handle REQUIRED dependencies
-        // Check duplicate within same provider + projectId + contentType
-        if (itemsMap.has(depKey)) {
-          // Already resolved in plan
-          continue
-        }
-
-        if (visitedBranches.has(depKey)) {
-          // Cycle detected in dependency graph, skip re-traversal
-          continue
-        }
-        visitedBranches.add(depKey)
-
-        // Fetch compatible versions for the required dependency using its discovered depContentType
+        let selectedDepVersion: NormalizedModVersion | null = null
         let depCompatibleVersions: NormalizedModVersion[] = []
-        let depProject: NormalizedModProject | null = null
-        const depLoader = depContentType === "MOD" ? mapModLoaderToProviderName(effectiveLoader) : ""
-        try {
-          depProject = await depAdapter.getProject(env, depProjectId, depContentType).catch(() => null)
-          depCompatibleVersions = await depAdapter.getCompatibleVersions(
-            env,
-            depProjectId,
-            minecraftVersion,
-            depLoader,
-            depContentType,
+
+        if (manualDepOverride?.versionId && manualVersionObj) {
+          selectedDepVersion = manualVersionObj
+          warnings.push(
+            `Se forzó manualmente la versión "${selectedDepVersion.versionNumber || selectedDepVersion.id}" para "${depProjectName}". Verifique la compatibilidad en juego.`,
           )
-        } catch {
-          let allVersionsForDep: NormalizedModVersion[] | null = null
-          if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
-            allVersionsForDep = await depAdapter
-              .getProjectVersions(env, depProjectId, depContentType)
-              .catch(() => null)
-          }
-          unresolvedDependencies.push({
-            provider: current.provider,
-            projectId: depProjectId || null,
-            versionId: pinnedId || null,
-            projectName: dep.projectName || null,
-            contentType: depContentType || null,
-            reason: `Error al consultar versiones para la dependencia "${dep.projectName || depProjectId}".`,
-            allVersions: allVersionsForDep && allVersionsForDep.length > 0 ? (allVersionsForDep as any) : null,
-          })
-          warnings.push(`Error al consultar versiones para la dependencia "${dep.projectName || depProjectId}".`)
-          continue
-        }
-
-        let selectedDepVersion: NormalizedModVersion | undefined
-
-        // Priority 1: Manual override (exact 3-part key first, then 2-part key fallback)
-        const overrideVersionId =
-          manualOverridesMap.get(depKey) ||
-          manualOverridesMap.get(`${current.provider}:${depProjectId}`)
-
-        if (overrideVersionId) {
-          selectedDepVersion = depCompatibleVersions.find(
-            (v) => v.id === overrideVersionId || v.fileId === overrideVersionId,
-          )
-          if (!selectedDepVersion) {
-            let forcedVer: NormalizedModVersion | null = null
-            let forcedVerFailed = false
-
-            if (
-              manualVersionObj &&
-              (manualVersionObj.id === overrideVersionId || manualVersionObj.fileId === overrideVersionId)
-            ) {
-              forcedVer = manualVersionObj
-            } else {
-              try {
-                forcedVer = await depAdapter.getVersion(env, overrideVersionId, depProjectId, depContentType)
-              } catch {
-                forcedVerFailed = true
-              }
-            }
-
-            if (forcedVerFailed) {
-              const reason = `Error temporal al consultar la versión manual seleccionada "${overrideVersionId}" para "${dep.projectName || depProjectId}".`
-              warnings.push(reason)
-              let allVers: NormalizedModVersion[] = []
-              if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
-                allVers = await depAdapter.getProjectVersions(env, depProjectId, depContentType).catch(() => [])
-              }
-              unresolvedDependencies.push({
-                provider: current.provider,
-                projectId: depProjectId,
-                versionId: overrideVersionId,
-                projectName: dep.projectName || null,
-                contentType: depContentType,
-                reason,
-                allVersions: allVers && allVers.length > 0 ? (allVers as any) : [],
-              })
-              continue
-            }
-
-            if (forcedVer === null) {
-              conflicts.push(
-                `La versión manual seleccionada (${overrideVersionId}) para "${dep.projectName || depProjectId}" no existe en el proveedor.`,
-              )
-              continue
-            }
-
-            if (forcedVer.projectId && depProjectId && forcedVer.projectId !== depProjectId) {
-              conflicts.push(
-                `La versión manual seleccionada no pertenece a la dependencia seleccionada.`,
-              )
-              continue
-            }
-
-            selectedDepVersion = forcedVer
-            warnings.push(
-              `Se forzó manualmente la versión "${forcedVer.versionNumber || forcedVer.id}" para "${depProject?.name || dep.projectName || depProjectId}". Verifique la compatibilidad en juego.`,
-            )
-          }
         } else if (pinnedId) {
-          // Priority 2: Explicitly pinned versionId by provider
-          selectedDepVersion = depCompatibleVersions.find((v) => v.id === pinnedId || v.fileId === pinnedId)
-
-          if (!selectedDepVersion) {
-            if (depCompatibleVersions.length > 0) {
-              const sorted = [...depCompatibleVersions].sort((a, b) => {
-                const rankA = a.releaseType === "RELEASE" ? 3 : a.releaseType === "BETA" ? 2 : 1
-                const rankB = b.releaseType === "RELEASE" ? 3 : b.releaseType === "BETA" ? 2 : 1
-                if (rankA !== rankB) return rankB - rankA
-                return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
-              })
-              selectedDepVersion = sorted[0]!
-              warnings.push(
-                `El mod "${dep.projectName || depProjectId}" requería la versión "${pinnedId}", pero no es compatible con Minecraft ${minecraftVersion}. Se seleccionó automáticamente la versión compatible "${selectedDepVersion.versionNumber}".`,
-              )
-            } else {
-              let allVersionsForDep: NormalizedModVersion[] | null = null
-              if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
-                allVersionsForDep = await depAdapter
-                  .getProjectVersions(env, depProjectId, depContentType)
-                  .catch(() => null)
-              }
-              unresolvedDependencies.push({
-                provider: current.provider,
-                projectId: depProjectId || null,
-                versionId: pinnedId || null,
-                projectName: depProject?.name || dep.projectName || null,
-                contentType: depContentType || null,
-                reason: `No se encontró ninguna versión compatible con Minecraft ${minecraftVersion} y loader ${formatModLoaderDisplayName(effectiveLoader || depLoader)}.`,
-                allVersions: allVersionsForDep && allVersionsForDep.length > 0 ? (allVersionsForDep as any) : null,
-              })
-              warnings.push(
-                `No se encontró versión compatible para "${depProject?.name || dep.projectName || depProjectId}". Puede seleccionar una versión manualmente.`,
-              )
-              continue
-            }
+          const depLoader = depContentType === "MOD" ? mapModLoaderToProviderName(effectiveLoader) : ""
+          try {
+            depCompatibleVersions = await depAdapter.getCompatibleVersions(
+              env,
+              depProjectId,
+              minecraftVersion,
+              depLoader,
+              depContentType,
+            )
+          } catch {
+            // Ignore
           }
-        } else {
-          // Priority 3: Automatic selection (latest stable RELEASE, fallback to BETA/ALPHA)
-          if (depCompatibleVersions.length === 0) {
+
+          if (pinnedVersionObj && pinnedVersionObj.gameVersions.includes(minecraftVersion)) {
+            selectedDepVersion = pinnedVersionObj
+          } else if (depCompatibleVersions.length > 0) {
+            const sorted = [...depCompatibleVersions].sort((a, b) => {
+              const rankA = a.releaseType === "RELEASE" ? 3 : a.releaseType === "BETA" ? 2 : 1
+              const rankB = b.releaseType === "RELEASE" ? 3 : b.releaseType === "BETA" ? 2 : 1
+              if (rankA !== rankB) return rankB - rankA
+              return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+            })
+            selectedDepVersion = sorted[0]!
+            warnings.push(
+              `El mod "${depProjectName}" requería la versión "${pinnedId}", pero no es compatible con Minecraft ${minecraftVersion}. Se seleccionó automáticamente la versión compatible "${selectedDepVersion.versionNumber}".`,
+            )
+          } else {
             let allVersionsForDep: NormalizedModVersion[] | null = null
             if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
               allVersionsForDep = await depAdapter
                 .getProjectVersions(env, depProjectId, depContentType)
                 .catch(() => null)
             }
+            const reason = `No se encontró ninguna versión compatible con Minecraft ${minecraftVersion}${depContentType === "MOD" ? ` y loader ${formatModLoaderDisplayName(effectiveLoader || depLoader)}` : ""}.`
+            warnings.push(
+              `No se encontró versión compatible para "${depProjectName}". Puede seleccionar una versión manualmente.`,
+            )
             unresolvedDependencies.push({
               provider: current.provider,
-              projectId: depProjectId || null,
-              versionId: null,
-              projectName: depProject?.name || dep.projectName || null,
-              contentType: depContentType || null,
-              reason: `No se encontró ninguna versión compatible con Minecraft ${minecraftVersion} y loader ${formatModLoaderDisplayName(effectiveLoader || depLoader)}.`,
+              projectId: depProjectId,
+              versionId: pinnedId,
+              projectName: depProjectName,
+              contentType: depContentType,
+              reason,
               allVersions: allVersionsForDep && allVersionsForDep.length > 0 ? (allVersionsForDep as any) : null,
             })
-            warnings.push(
-              `No se encontró versión compatible para "${depProject?.name || dep.projectName || depProjectId}". Puede seleccionar una versión manualmente.`,
-            )
             continue
           }
+        } else {
+          const depLoader = depContentType === "MOD" ? mapModLoaderToProviderName(effectiveLoader) : ""
+          try {
+            depCompatibleVersions = await depAdapter.getCompatibleVersions(
+              env,
+              depProjectId,
+              minecraftVersion,
+              depLoader,
+              depContentType,
+            )
+          } catch {
+            // Ignore
+          }
 
-          const sorted = [...depCompatibleVersions].sort((a, b) => {
-            const rankA = a.releaseType === "RELEASE" ? 3 : a.releaseType === "BETA" ? 2 : 1
-            const rankB = b.releaseType === "RELEASE" ? 3 : b.releaseType === "BETA" ? 2 : 1
-            if (rankA !== rankB) return rankB - rankA
-            return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
-          })
-          selectedDepVersion = sorted[0]
+          if (depCompatibleVersions.length > 0) {
+            const sorted = [...depCompatibleVersions].sort((a, b) => {
+              const rankA = a.releaseType === "RELEASE" ? 3 : a.releaseType === "BETA" ? 2 : 1
+              const rankB = b.releaseType === "RELEASE" ? 3 : b.releaseType === "BETA" ? 2 : 1
+              if (rankA !== rankB) return rankB - rankA
+              return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+            })
+            selectedDepVersion = sorted[0]!
+          } else {
+            let allVersionsForDep: NormalizedModVersion[] | null = null
+            if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+              allVersionsForDep = await depAdapter
+                .getProjectVersions(env, depProjectId, depContentType)
+                .catch(() => null)
+            }
+            const reason = `No se encontró ninguna versión compatible con Minecraft ${minecraftVersion}${depContentType === "MOD" ? ` y loader ${formatModLoaderDisplayName(effectiveLoader || depLoader)}` : ""}.`
+            warnings.push(
+              `No se encontró versión compatible para "${depProjectName}". Puede seleccionar una versión manualmente.`,
+            )
+            unresolvedDependencies.push({
+              provider: current.provider,
+              projectId: depProjectId,
+              versionId: null,
+              projectName: depProjectName,
+              contentType: depContentType,
+              reason,
+              allVersions: allVersionsForDep && allVersionsForDep.length > 0 ? (allVersionsForDep as any) : null,
+            })
+            continue
+          }
         }
 
         if (!selectedDepVersion) {
-          warnings.push(`No se pudo resolver una versión válida para la dependencia "${dep.projectName || depProjectId}".`)
+          warnings.push(`No se pudo resolver una versión válida para la dependencia "${depProjectName}".`)
           continue
         }
 
-        const knownDepEnv: ModEnvironmentGql | null =
-          isKnownEnvironment(depProject?.environment)
-            ? depProject.environment
-            : isKnownEnvironment(selectedDepVersion.environment)
-            ? selectedDepVersion.environment
-            : null
+        // Construct exact artifactKey for visited tracking
+        const artifactKey = `${current.provider}:${depProjectId}:${selectedDepVersion.id}`
+        if (visited.has(artifactKey)) {
+          // Exact artifact already processed (diamond dependency or cycle cut)
+          continue
+        }
+        visited.add(artifactKey)
 
-        let depEnv: ModEnvironmentGql | null = knownDepEnv
-        if (depContentType === "MOD" && !isKnownEnvironment(depEnv)) {
-          depEnv = isKnownEnvironment(rootEnv) ? rootEnv : null
+        // Check project-level version conflict in itemsMap
+        const projectKey = `${current.provider}:${depProjectId}`
+        const existingItem = itemsMap.get(projectKey)
+
+        if (existingItem) {
+          if (existingItem.versionId !== selectedDepVersion.id) {
+            conflicts.push(
+              `Conflicto de versiones para el proyecto "${depProjectName}": se solicitaron las versiones "${existingItem.versionNumber || existingItem.versionId}" y "${selectedDepVersion.versionNumber || selectedDepVersion.id}".`,
+            )
+          }
+          continue
         }
 
-        const finalDepContentType: ContentTypeGql = selectedDepVersion.contentType || depContentType
-        const depProjectName = depProject?.name || dep.projectName || selectedDepVersion.name || "Dependencia"
-        const depLogicalPath = getLogicalPathForContent(finalDepContentType, selectedDepVersion.filename)
-        const depTargetCategory = finalDepContentType === "SHADER" ? "SHADER_PACK" : finalDepContentType
+        let depEnv: ModEnvironmentGql | null = null
+        if (isKnownEnvironment(selectedDepVersion.environment)) {
+          depEnv = selectedDepVersion.environment
+        } else if (isKnownEnvironment(depProject?.environment)) {
+          depEnv = depProject.environment
+        } else if (isKnownEnvironment(rootEnv)) {
+          depEnv = rootEnv
+        }
 
+        const depCategory = depContentType === "SHADER" ? "SHADER_PACK" : depContentType
         const existingDep = draftFiles.find(
           (f) =>
             f.sourceProvider === current.provider &&
             f.sourceProjectId === depProjectId &&
-            f.category === depTargetCategory,
+            f.category === depCategory,
         )
 
         let depAction: "INSTALL" | "UPDATE" | "ALREADY_INSTALLED" | "CONFLICT" = "INSTALL"
@@ -2522,8 +2428,9 @@ export class ModProviderManager {
           const isSameVersion =
             Boolean(existingDep.sourceVersionId && existingDep.sourceVersionId === selectedDepVersion.id) ||
             Boolean(existingDep.sourceFileId && selectedDepVersion.fileId && existingDep.sourceFileId === selectedDepVersion.fileId)
+          const isSameEnv = (existingDep.sourceEnvironment || null) === (depEnv || null)
 
-          if (isSameVersion) {
+          if (isSameVersion && isSameEnv) {
             depAction = "ALREADY_INSTALLED"
           } else {
             depAction = "UPDATE"
@@ -2533,11 +2440,14 @@ export class ModProviderManager {
         let allVersionsForDep: NormalizedModVersion[] | null = null
         if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
           allVersionsForDep = await depAdapter
-            .getProjectVersions(env, depProjectId, finalDepContentType)
+            .getProjectVersions(env, depProjectId, depContentType)
             .catch(() => null)
         }
 
-        itemsMap.set(depKey, {
+        const finalDepContentType: ContentTypeGql = depContentType || selectedDepVersion.contentType || "MOD"
+        const depLogicalPath = getLogicalPathForContent(finalDepContentType, selectedDepVersion.filename)
+
+        itemsMap.set(projectKey, {
           provider: current.provider,
           projectId: depProjectId,
           projectName: depProjectName,
@@ -2561,7 +2471,7 @@ export class ModProviderManager {
           allVersions: allVersionsForDep && allVersionsForDep.length > 0 ? (allVersionsForDep as any) : null,
         })
 
-        // Enqueue to resolve transitive dependencies
+        // Enqueue to resolve transitive dependencies recursively
         queue.push({
           provider: current.provider,
           version: selectedDepVersion,

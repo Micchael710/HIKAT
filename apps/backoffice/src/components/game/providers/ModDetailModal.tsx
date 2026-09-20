@@ -100,14 +100,20 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
   const [installing, setInstalling] = useState(false)
   const [queuedOptionalIds, setQueuedOptionalIds] = useState<Set<string>>(new Set())
 
+  const selectedVersion = detail?.compatibleVersions.find(
+    (v) => v.id === selectedVersionId || v.fileId === selectedVersionId,
+  )
+
+  const rawModEnvironment = selectedVersion?.environment ?? detail?.environment ?? "UNKNOWN"
+
   const isModEnvironmentUnknown =
     currentContentType === "MOD" &&
-    (detail?.environment === "UNKNOWN" || !detail?.environment)
+    (rawModEnvironment === "UNKNOWN" || !rawModEnvironment)
 
   const isBothEnvironment =
     isServer &&
     currentContentType === "MOD" &&
-    (detail?.environment === "BOTH" || selectedEnvironmentOverride === "BOTH")
+    (rawModEnvironment === "BOTH" || selectedEnvironmentOverride === "BOTH")
 
   // 1. Fetch project details whenever active target or loaderOverride changes
   useEffect(() => {
@@ -219,12 +225,6 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
       return
     }
 
-    if (isModEnvironmentUnknown && !selectedEnvironmentOverride) {
-      setReleasePlan(null)
-      setServerPlan(null)
-      return
-    }
-
     let active = true
     setResolvingPlan(true)
 
@@ -272,7 +272,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
             versionId: selectedVersionId,
             contentType: currentContentType,
             manualOverrides: overridesList.length > 0 ? overridesList : null,
-            environmentOverride: isModEnvironmentUnknown ? selectedEnvironmentOverride : undefined,
+            environmentOverride: selectedEnvironmentOverride || undefined,
             ...(loaderOverride ? { loaderOverride } : {}),
             includeAllVersions: manualMode,
           },
@@ -1083,7 +1083,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                         {isServer ? "Archivos a instalar en el servidor" : "Dependencias requeridas"}
                       </h4>
 
-                      {!isServer && releasePlan && releasePlan.items.length > 1 && (
+                      {!isServer && releasePlan && (releasePlan.items.length > 1 || ((releasePlan as any).unresolvedDependencies && (releasePlan as any).unresolvedDependencies.length > 0)) && (
                         <div style={{ display: "flex", gap: "12px", fontSize: "12px" }}>
                           <label
                             style={{
@@ -1297,11 +1297,11 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                             )
                           })}
                       </div>
-                    ) : (
+                    ) : !resolvingPlan ? (
                       <div style={{ fontSize: "13px", color: "#9ca3af" }}>
                         Este contenido no declara dependencias requeridas adicionales.
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Conflicts warning */}
                     {plan && plan.conflicts && plan.conflicts.length > 0 && (

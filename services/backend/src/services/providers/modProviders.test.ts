@@ -1654,7 +1654,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       const files = await installModPlan(
         db,
         env,
-        { provider: "MODRINTH", projectId: "proj-root-mod", versionId: "ver-root-mod", contentType: "MOD" },
+        { provider: "MODRINTH", projectId: "proj-root-mod", versionId: "ver-root-mod", contentType: "MOD", environmentOverride: "BOTH" },
         adminUserId,
       )
 
@@ -3533,6 +3533,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
               projectId: "mod-succ",
               versionId: "ver-succ",
               contentType: "MOD",
+              environmentOverride: "BOTH",
             },
             adminUserId,
           ),
@@ -4339,7 +4340,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
   })
 
   describe("13. CurseForge Environment Selection, Fail-Closed Rules & Dependency Inheritance", () => {
-    it("resolveInstallationPlan fails closed with conflict when CurseForge MOD has unknown environment and no override is provided", async () => {
+    it("resolveInstallationPlan succeeds without blocking when CurseForge MOD has unknown environment and no override is provided", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
         if (u.includes("api.curseforge.com/v1/mods/555555/files")) {
@@ -4376,8 +4377,10 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         { provider: "CURSEFORGE", projectId: "555555", versionId: "10001", contentType: "MOD" },
       )
 
-      expect(plan.isValid).toBe(false)
-      expect(plan.conflicts.some((c) => c.includes("Se requiere especificar el entorno de ejecución"))).toBe(true)
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts).toHaveLength(0)
+      expect(plan.items).toHaveLength(1)
+      expect(plan.items[0]?.environment).toBeNull()
     })
 
     it("resolveInstallationPlan applies CLIENT environmentOverride to root and inherits it to unknown CurseForge dependencies", async () => {
@@ -6041,15 +6044,16 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         return { ok: false, status: 404 }
       })
 
-      // Without environmentOverride, flags conflict
+      // Without environmentOverride, plan remains valid with environment null (resolution does not block)
       const planNoOverride = await manager.resolveInstallationPlan(env, db, {
         provider: "MODRINTH",
         projectId: "mr-unknown-env",
         versionId: "v-mr-unknown",
         contentType: "MOD",
       })
-      expect(planNoOverride.isValid).toBe(false)
-      expect(planNoOverride.conflicts.some((c) => c.includes("Se requiere especificar el entorno de ejecución"))).toBe(true)
+      expect(planNoOverride.isValid).toBe(true)
+      expect(planNoOverride.conflicts).toHaveLength(0)
+      expect(planNoOverride.items[0]?.environment).toBeNull()
 
       // With environmentOverride = SERVER, plan is valid and item has environment = SERVER
       const planWithOverride = await manager.resolveInstallationPlan(env, db, {
@@ -6686,6 +6690,573 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(plan.isValid).toBe(false)
       expect(plan.conflicts).toContain("La versión manual seleccionada no pertenece a la dependencia seleccionada.")
       expect(plan.items.some((i) => i.projectId === "dep-proj-A" || i.projectId === "dep-proj-B")).toBe(false)
+    })
+  })
+
+  describe("24. Unified Graph Resolution, Environment Decisions & Relation Mappings", () => {
+    it("resolves diamond dependencies cleanly with visited deduplication", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+
+        if (u.includes("/project/root-diamond/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-diamond-root",
+                project_id: "root-diamond",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_and_server",
+                files: [{ filename: "diamond-root.jar", size: 1000, url: "https://cdn/d-root.jar", primary: true }],
+                dependencies: [
+                  { project_id: "proj-b", dependency_type: "required" },
+                  { project_id: "proj-c", dependency_type: "required" },
+                ],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-diamond")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ id: "root-diamond", title: "Diamond Root", project_type: "mod" }),
+          }
+        }
+
+        if (u.includes("/project/proj-b/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-b",
+                project_id: "proj-b",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_and_server",
+                files: [{ filename: "b.jar", size: 1000, url: "https://cdn/b.jar", primary: true }],
+                dependencies: [{ project_id: "proj-d", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/proj-b")) {
+          return { ok: true, status: 200, json: async () => ({ id: "proj-b", title: "Project B", project_type: "mod" }) }
+        }
+
+        if (u.includes("/project/proj-c/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-c",
+                project_id: "proj-c",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_and_server",
+                files: [{ filename: "c.jar", size: 1000, url: "https://cdn/c.jar", primary: true }],
+                dependencies: [{ project_id: "proj-d", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/proj-c")) {
+          return { ok: true, status: 200, json: async () => ({ id: "proj-c", title: "Project C", project_type: "mod" }) }
+        }
+
+        if (u.includes("/project/proj-d/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-d",
+                project_id: "proj-d",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_and_server",
+                files: [{ filename: "d.jar", size: 1000, url: "https://cdn/d.jar", primary: true }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/proj-d")) {
+          return { ok: true, status: 200, json: async () => ({ id: "proj-d", title: "Project D", project_type: "mod" }) }
+        }
+
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-diamond",
+        versionId: "v-diamond-root",
+        contentType: "MOD",
+      })
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts).toHaveLength(0)
+      expect(plan.warnings).toHaveLength(0)
+      // Exactly 4 items: root, B, C, D (D is deduplicated and only present once)
+      expect(plan.items).toHaveLength(4)
+      const projectIds = plan.items.map((i) => i.projectId).sort()
+      expect(projectIds).toEqual(["proj-b", "proj-c", "proj-d", "root-diamond"].sort())
+    })
+
+    it("resolves cyclic dependencies cleanly without infinite loop", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+
+        if (u.includes("/project/root-cycle/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-cycle-a",
+                project_id: "root-cycle",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_and_server",
+                files: [{ filename: "cycle-a.jar", size: 1000, url: "https://cdn/cycle-a.jar", primary: true }],
+                dependencies: [{ project_id: "proj-cycle-b", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-cycle")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-cycle", title: "Cycle Root", project_type: "mod" }) }
+        }
+
+        if (u.includes("/project/proj-cycle-b/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-cycle-b",
+                project_id: "proj-cycle-b",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_and_server",
+                files: [{ filename: "cycle-b.jar", size: 1000, url: "https://cdn/cycle-b.jar", primary: true }],
+                dependencies: [{ project_id: "root-cycle", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/proj-cycle-b")) {
+          return { ok: true, status: 200, json: async () => ({ id: "proj-cycle-b", title: "Cycle B", project_type: "mod" }) }
+        }
+
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-cycle",
+        versionId: "v-cycle-a",
+        contentType: "MOD",
+      })
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts).toHaveLength(0)
+      expect(plan.items).toHaveLength(2)
+      const ids = plan.items.map((i) => i.projectId).sort()
+      expect(ids).toEqual(["proj-cycle-b", "root-cycle"].sort())
+    })
+
+    it("detects conflicting versions of the same project requested by different branches", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+
+        if (u.includes("/project/root-branch-conflict/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-root-bc",
+                project_id: "root-branch-conflict",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_and_server",
+                files: [{ filename: "root-bc.jar", size: 1000, url: "https://cdn/root-bc.jar", primary: true }],
+                dependencies: [
+                  { project_id: "branch-b", dependency_type: "required" },
+                  { project_id: "branch-c", dependency_type: "required" },
+                ],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-branch-conflict")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-branch-conflict", title: "Branch Conflict Root", project_type: "mod" }) }
+        }
+
+        if (u.includes("/project/branch-b/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-b",
+                project_id: "branch-b",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_and_server",
+                files: [{ filename: "b.jar", size: 1000, url: "https://cdn/b.jar", primary: true }],
+                dependencies: [{ project_id: "shared-d", version_id: "v-d-1", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/branch-b")) {
+          return { ok: true, status: 200, json: async () => ({ id: "branch-b", title: "Branch B", project_type: "mod" }) }
+        }
+
+        if (u.includes("/project/branch-c/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-c",
+                project_id: "branch-c",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_and_server",
+                files: [{ filename: "c.jar", size: 1000, url: "https://cdn/c.jar", primary: true }],
+                dependencies: [{ project_id: "shared-d", version_id: "v-d-2", dependency_type: "required" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/branch-c")) {
+          return { ok: true, status: 200, json: async () => ({ id: "branch-c", title: "Branch C", project_type: "mod" }) }
+        }
+
+        if (u.includes("/version/v-d-1")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-d-1",
+              project_id: "shared-d",
+              version_number: "1.0.0",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "d-1.jar", size: 1000, url: "https://cdn/d-1.jar", primary: true }],
+              dependencies: [],
+            }),
+          }
+        }
+
+        if (u.includes("/version/v-d-2")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-d-2",
+              project_id: "shared-d",
+              version_number: "2.0.0",
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              files: [{ filename: "d-2.jar", size: 1000, url: "https://cdn/d-2.jar", primary: true }],
+              dependencies: [],
+            }),
+          }
+        }
+
+        if (u.includes("/project/shared-d")) {
+          return { ok: true, status: 200, json: async () => ({ id: "shared-d", title: "Shared D", project_type: "mod" }) }
+        }
+
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-branch-conflict",
+        versionId: "v-root-bc",
+        contentType: "MOD",
+      })
+
+      expect(plan.isValid).toBe(false)
+      expect(plan.conflicts.some((c) => c.includes("Conflicto de versiones para el proyecto \"Shared D\""))).toBe(true)
+    })
+
+    it("correctly maps Modrinth version environment strings and never uses project fallback", async () => {
+      const adapter = manager.getAdapter("MODRINTH")
+
+      // Mock project detail with client_only to verify it is NOT used as fallback
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/version/v-cos")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-cos",
+              project_id: "proj-test",
+              version_number: "1.0.0",
+              environment: "client_or_server",
+              files: [{ filename: "test.jar", size: 100, url: "https://cdn/test.jar", primary: true }],
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/version/v-cas")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-cas",
+              project_id: "proj-test",
+              version_number: "1.0.0",
+              environment: "client_and_server",
+              files: [{ filename: "test.jar", size: 100, url: "https://cdn/test.jar", primary: true }],
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/version/v-unrec")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-unrec",
+              project_id: "proj-test",
+              version_number: "1.0.0",
+              environment: "some_unrecognized_value",
+              files: [{ filename: "test.jar", size: 100, url: "https://cdn/test.jar", primary: true }],
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              dependencies: [],
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const verCos = await adapter.getVersion(env, "v-cos", "proj-test", "MOD")
+      expect(verCos?.environment).toBe("BOTH")
+
+      const verCas = await adapter.getVersion(env, "v-cas", "proj-test", "MOD")
+      expect(verCas?.environment).toBe("BOTH")
+
+      const verUnrec = await adapter.getVersion(env, "v-unrec", "proj-test", "MOD")
+      expect(verUnrec?.environment).toBe("UNKNOWN")
+    })
+
+    it("filters out embedded dependencies completely on Modrinth", async () => {
+      const adapter = manager.getAdapter("MODRINTH")
+
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/version/v-deps")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "v-deps",
+              project_id: "proj-with-deps",
+              version_number: "1.0.0",
+              files: [{ filename: "test.jar", size: 100, url: "https://cdn/test.jar", primary: true }],
+              game_versions: ["1.21.1"],
+              loaders: ["neoforge"],
+              dependencies: [
+                { project_id: "emb-dep", dependency_type: "embedded" },
+                { project_id: "req-dep", dependency_type: "required" },
+                { project_id: "opt-dep", dependency_type: "optional" },
+                { project_id: "inc-dep", dependency_type: "incompatible" },
+              ],
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const ver = await adapter.getVersion(env, "v-deps", "proj-with-deps", "MOD")
+      expect(ver).not.toBeNull()
+      const depProjectIds = ver!.dependencies.map((d) => d.projectId)
+      expect(depProjectIds).toContain("req-dep")
+      expect(depProjectIds).toContain("opt-dep")
+      expect(depProjectIds).toContain("inc-dep")
+      expect(depProjectIds).not.toContain("emb-dep")
+    })
+
+    it("maps CurseForge relationTypes correctly (1/3 REQUIRED, 2 OPTIONAL, 5 INCOMPATIBLE, others ignored)", async () => {
+      const adapter = manager.getAdapter("CURSEFORGE")
+
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/12345/files/999")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: {
+                id: 999,
+                fileName: "cf-test.jar",
+                downloadUrl: "https://cdn/cf-test.jar",
+                gameVersions: ["1.21.1", "NeoForge"],
+                dependencies: [
+                  { modId: 101, relationType: 1 }, // EmbeddedLibrary -> REQUIRED
+                  { modId: 102, relationType: 2 }, // OptionalDependency -> OPTIONAL
+                  { modId: 103, relationType: 3 }, // RequiredDependency -> REQUIRED
+                  { modId: 104, relationType: 4 }, // Tool -> IGNORE
+                  { modId: 105, relationType: 5 }, // Incompatible -> INCOMPATIBLE
+                  { modId: 106, relationType: 6 }, // Include -> IGNORE
+                  { modId: 107, relationType: 99 }, // Unknown -> IGNORE
+                ],
+              },
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const ver = await adapter.getVersion(env, "999", "12345", "MOD")
+      expect(ver).not.toBeNull()
+      expect(ver!.dependencies).toHaveLength(4)
+
+      const dep101 = ver!.dependencies.find((d) => d.projectId === "101")
+      expect(dep101?.dependencyType).toBe("REQUIRED")
+
+      const dep102 = ver!.dependencies.find((d) => d.projectId === "102")
+      expect(dep102?.dependencyType).toBe("OPTIONAL")
+
+      const dep103 = ver!.dependencies.find((d) => d.projectId === "103")
+      expect(dep103?.dependencyType).toBe("REQUIRED")
+
+      const dep105 = ver!.dependencies.find((d) => d.projectId === "105")
+      expect(dep105?.dependencyType).toBe("INCOMPATIBLE")
+
+      expect(ver!.dependencies.some((d) => d.projectId === "104")).toBe(false)
+      expect(ver!.dependencies.some((d) => d.projectId === "106")).toBe(false)
+      expect(ver!.dependencies.some((d) => d.projectId === "107")).toBe(false)
+    })
+
+    it("updates metadata in D1 without re-downloading or re-uploading to R2 when binary is already in draft with identical version", async () => {
+      // 1. Prepare draft release in DB with an existing file
+      const draftRelease = await prepareGameDraft(db, adminUserId, null, env)
+
+      const existingFile = await db
+        .insert(schema.gameReleaseFiles)
+        .values({
+          id: "existing-file-meta-test",
+          releaseId: draftRelease.id,
+          name: "meta-test.jar",
+          sizeBytes: 1000,
+          sha256: "aabbcc11223344556677889900aabbcc11223344556677889900aabbcc112233",
+          category: "MOD",
+          sourceProvider: "MODRINTH",
+          sourceProjectId: "meta-mod",
+          sourceVersionId: "v-meta-1",
+          sourceEnvironment: "CLIENT",
+          logicalPath: "mods/meta-test.jar",
+          createdAt: new Date().toISOString(),
+        })
+        .returning()
+        .get()
+
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/meta-mod/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "v-meta-1",
+                project_id: "meta-mod",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                environment: "client_and_server", // now BOTH
+                files: [
+                  {
+                    filename: "meta-test.jar",
+                    size: 1000,
+                    url: "https://cdn/meta-test.jar",
+                    primary: true,
+                    hashes: { sha512: "dummy512" },
+                  },
+                ],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/meta-mod")) {
+          return { ok: true, status: 200, json: async () => ({ id: "meta-mod", title: "Meta Mod", project_type: "mod" }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      // Resolve plan with new environment BOTH
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "meta-mod",
+        versionId: "v-meta-1",
+        contentType: "MOD",
+      })
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.items).toHaveLength(1)
+      expect(plan.items[0]!.action).toBe("UPDATE")
+      expect(plan.items[0]!.environment).toBe("BOTH")
+
+      // Verify NO R2 upload was initiated
+      r2.createMultipartUpload.mockClear()
+
+      const installedFiles = await installModPlansBatch(
+        db,
+        env,
+        {
+          plans: [
+            {
+              provider: "MODRINTH",
+              projectId: "meta-mod",
+              versionId: "v-meta-1",
+              contentType: "MOD",
+            },
+          ],
+        },
+        adminUserId,
+      )
+
+      expect(r2.createMultipartUpload).not.toHaveBeenCalled()
+      expect(installedFiles).toHaveLength(1)
+      expect(installedFiles[0]!.sourceEnvironment).toBe("BOTH")
+
+      // Check DB directly
+      const updatedRow = await db
+        .select()
+        .from(schema.gameReleaseFiles)
+        .where(eq(schema.gameReleaseFiles.id, existingFile.id))
+        .get()
+
+      expect(updatedRow?.sourceEnvironment).toBe("BOTH")
     })
   })
 })

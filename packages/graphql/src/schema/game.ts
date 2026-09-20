@@ -404,6 +404,7 @@ export const gameTypeDefs = /* GraphQL */ `
     sizeBytes: Int!
     sha256: String
     dependencies: [ModDependency!]!
+    environment: ModEnvironment
   }
 
   """

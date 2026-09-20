@@ -440,6 +440,7 @@ export interface ModProjectVersion {
   sizeBytes: number
   sha256?: string | null
   dependencies: ModDependency[]
+  environment?: ModEnvironment | null
 }
 
 export interface ModProjectDetail {

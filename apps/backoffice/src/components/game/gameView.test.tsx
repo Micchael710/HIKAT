@@ -1454,14 +1454,28 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         expect(screen.getByTestId("mod-detail-modal")).toBeDefined()
       })
 
-      // Verify that resolvePlan was NOT called initially because environment is unknown
-      expect(resolvePlanSpy).not.toHaveBeenCalled()
+      // Verify that resolvePlan was called initially with environmentOverride: undefined
+      await waitFor(() => {
+        expect(resolvePlanSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            provider: "CURSEFORGE",
+            projectId: "cf-unknown-1",
+            versionId: "cf-ver-100",
+            environmentOverride: undefined,
+          }),
+          "srv-1",
+        )
+      })
 
       // Verify environment selector is rendered
       const envSelector = await screen.findByTestId("curseforge-environment-selector")
       expect(envSelector).toBeDefined()
       expect(screen.getByTestId("option-env-client")).toBeDefined()
       expect(screen.getByTestId("option-env-both")).toBeDefined()
+
+      // Before selecting environment, install button is disabled because environment is unknown
+      const installBtnBefore = screen.getByTestId("button-confirm-install")
+      expect(installBtnBefore.hasAttribute("disabled")).toBe(true)
 
       // Select CLIENT option
       const clientOption = screen.getByTestId("option-env-client")

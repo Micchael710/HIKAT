@@ -2548,6 +2548,7 @@ export const modProvidersApi = {
               projectName
               fileName
             }
+            environment
           }
           installedVersion
           isInstalled
@@ -2915,6 +2916,7 @@ export const serverContentApi = {
               projectName
               fileName
             }
+            environment
           }
           installedVersion
           isInstalled

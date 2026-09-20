@@ -563,19 +563,33 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     if (file.releaseType === 2) releaseType = "BETA"
     else if (file.releaseType === 3) releaseType = "ALPHA"
 
-    // Map dependencies
-    // CurseForge FileRelationType:
+    // Map dependencies strictly from official CurseForge FileRelationType:
     // 1=EmbeddedLibrary (REQUIRED), 2=OptionalDependency (OPTIONAL), 3=RequiredDependency (REQUIRED),
-    // 4=Tool (skip/omit), 5=Incompatible (INCOMPATIBLE), 6=Include (skip/omit)
+    // 4=Tool (ignore), 5=Incompatible (INCOMPATIBLE), 6=Include (ignore), other=ignore
     const dependencies: NormalizedModDependency[] = []
     for (const d of file.dependencies || []) {
-      if (d.relationType === 4 || d.relationType === 6) {
+      let depType: ModDependencyTypeGql | null = null
+      switch (d.relationType) {
+        case 1:
+        case 3:
+          depType = "REQUIRED"
+          break
+        case 2:
+          depType = "OPTIONAL"
+          break
+        case 5:
+          depType = "INCOMPATIBLE"
+          break
+        case 4:
+        case 6:
+        default:
+          depType = null
+          break
+      }
+
+      if (!depType) {
         continue
       }
-      let depType: ModDependencyTypeGql = "REQUIRED"
-      if (d.relationType === 2) depType = "OPTIONAL"
-      else if (d.relationType === 5) depType = "INCOMPATIBLE"
-      else if (d.relationType === 1 || d.relationType === 3) depType = "REQUIRED"
 
       dependencies.push({
         projectId: String(d.modId),
