@@ -1331,9 +1331,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         { provider: "MODRINTH", projectId: "incomp-root-proj", versionId: "ver-incomp-root" },
       )
 
-      expect(plan.isValid).toBe(false)
-      expect(plan.conflicts.length).toBe(1)
-      expect(plan.conflicts[0]).toContain("declara incompatibilidad")
+      expect(plan.isValid).toBe(true)
+      expect(plan.warnings.length).toBe(1)
+      expect(plan.warnings[0]).toContain("declara incompatibilidad")
     })
 
     it("enforces pinned dependencies and flags conflict if pinned version is incompatible without fallback", async () => {
@@ -1403,9 +1403,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         { provider: "MODRINTH", projectId: "root-proj", versionId: "ver-root" },
       )
 
-      expect(plan.isValid).toBe(false)
-      expect(plan.conflicts.length).toBeGreaterThan(0)
-      expect(plan.conflicts[0]).toContain("versión requerida")
+      expect(plan.isValid).toBe(true)
+      expect(plan.unresolvedDependencies.length).toBe(1)
+      expect(plan.unresolvedDependencies[0]?.versionId).toBe("ver-pinned-incompat")
     })
 
     it("resolves transitive dependencies, handles deduplication and skips cycles cleanly", async () => {
@@ -3153,9 +3153,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           contentType: "MOD",
         })
 
-        expect(plan.isValid).toBe(false)
-        expect(plan.conflicts.length).toBe(1)
-        expect(plan.conflicts[0]).toContain('declara incompatibilidad con "optifine.jar"')
+        expect(plan.isValid).toBe(true)
+        expect(plan.warnings.length).toBe(1)
+        expect(plan.warnings[0]).toContain('declara incompatibilidad con "optifine.jar"')
       })
 
       it("conflicts when declared INCOMPATIBLE target is to be installed in the same Plan", async () => {
@@ -3224,9 +3224,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           contentType: "MOD",
         })
 
-        expect(plan.isValid).toBe(false)
-        expect(plan.conflicts.length).toBe(1)
-        expect(plan.conflicts[0]).toContain('declara incompatibilidad con "Mod B"')
+        expect(plan.isValid).toBe(true)
+        expect(plan.warnings.length).toBe(1)
+        expect(plan.warnings[0]).toContain('declara incompatibilidad con "Mod B"')
       })
 
       it("does not conflict when INCOMPATIBLE is pinned to a version different from what is installed", async () => {
@@ -3922,9 +3922,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           contentType: "MOD",
         })
 
-        expect(plan.isValid).toBe(false)
-        expect(plan.conflicts.length).toBe(1)
-        expect(plan.conflicts[0]).toContain('declara incompatibilidad con la versión instalada de "incompat-target.jar"')
+        expect(plan.isValid).toBe(true)
+        expect(plan.warnings.length).toBe(1)
+        expect(plan.warnings[0]).toContain('declara incompatibilidad con la versión instalada de "incompat-target.jar"')
       })
 
       it("versionId-only incompatible + different version installed in draft -> valid (no conflict)", async () => {
@@ -4081,9 +4081,9 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           contentType: "MOD",
         })
 
-        expect(plan.isValid).toBe(false)
-        expect(plan.conflicts.length).toBe(1)
-        expect(plan.conflicts[0]).toContain('declara incompatibilidad con la versión seleccionada de "Shared Dep"')
+        expect(plan.isValid).toBe(true)
+        expect(plan.warnings.length).toBe(1)
+        expect(plan.warnings[0]).toContain('declara incompatibilidad con la versión seleccionada de "Shared Dep"')
       })
 
       it("same projectId in a different provider -> NO conflict", async () => {
@@ -4531,7 +4531,7 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(depItem?.environment).toBe("BOTH")
     })
 
-    it("resolveInstallationPlan rejects SERVER environmentOverride with validation error", async () => {
+    it("resolveInstallationPlan accepts SERVER environmentOverride and marks environment SERVER", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)
         if (u.includes("api.curseforge.com/v1/mods/555555/files")) {
@@ -4562,19 +4562,19 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         return { ok: false, status: 404 }
       })
 
-      await expect(
-        manager.resolveInstallationPlan(
-          env,
-          db,
-          {
-            provider: "CURSEFORGE",
-            projectId: "555555",
-            versionId: "10001",
-            contentType: "MOD",
-            environmentOverride: "SERVER",
-          },
-        ),
-      ).rejects.toThrow(/mods exclusivos de servidor/)
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        {
+          provider: "CURSEFORGE",
+          projectId: "555555",
+          versionId: "10001",
+          contentType: "MOD",
+          environmentOverride: "SERVER",
+        },
+      )
+      expect(plan.isValid).toBe(true)
+      expect(plan.items[0]?.environment).toBe("SERVER")
     })
 
     it("resolveServerInstallationPlan with environmentOverride BOTH flags requiresGameUpdate = true", async () => {
@@ -5534,5 +5534,434 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       }
     })
   })
+
+  describe("Phase 1: Mod Provider Resolver Improvements Suite", () => {
+    it("resolveInstallationPlan automatically falls back to latest compatible version when pinned version is incompatible and emits warning", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-pinned-incompat/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-root-1",
+                name: "Root 1.0",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ primary: true, filename: "root-1.0.jar", size: 1000, url: "https://cdn/root.jar" }],
+                dependencies: [
+                  { project_id: "dep-mod", version_id: "ver-dep-old", dependency_type: "required" },
+                ],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-pinned-incompat")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-pinned-incompat", title: "Root Mod", project_type: "mod" }) }
+        }
+        if (u.includes("/version/ver-dep-old")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-dep-old",
+              project_id: "dep-mod",
+              name: "Dep Old",
+              game_versions: ["1.20.1"],
+              loaders: ["neoforge"],
+              files: [{ primary: true, filename: "dep-old.jar", size: 800, url: "https://cdn/dep-old.jar" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/dep-mod/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-dep-compat",
+                project_id: "dep-mod",
+                name: "Dep Compat 2.0",
+                version_number: "2.0.0",
+                version_type: "release",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ primary: true, filename: "dep-2.0.jar", size: 850, url: "https://cdn/dep-2.0.jar" }],
+                dependencies: [],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/dep-mod")) {
+          return { ok: true, status: 200, json: async () => ({ id: "dep-mod", title: "Dep Mod", project_type: "mod" }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-pinned-incompat",
+        versionId: "ver-root-1",
+        contentType: "MOD",
+      })
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts.length).toBe(0)
+      expect(plan.items.length).toBe(2)
+      expect(plan.items[1]?.versionId).toBe("ver-dep-compat")
+      expect(plan.warnings.length).toBe(1)
+      expect(plan.warnings[0]).toContain("requería la versión")
+      expect(plan.warnings[0]).toContain("Se seleccionó automáticamente la versión compatible")
+    })
+
+    it("resolveInstallationPlan populates unresolvedDependencies and warnings without blocking plan when no compatible version exists", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-no-compat-dep/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-root-nc",
+                name: "Root NC",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ primary: true, filename: "root-nc.jar", size: 1000, url: "https://cdn/root-nc.jar" }],
+                dependencies: [
+                  { project_id: "dep-abandoned", version_id: "ver-ab-1", dependency_type: "required" },
+                ],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-no-compat-dep")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-no-compat-dep", title: "Root NC", project_type: "mod" }) }
+        }
+        if (u.includes("/version/ver-ab-1")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-ab-1",
+              project_id: "dep-abandoned",
+              name: "Abandoned 1.0",
+              game_versions: ["1.16.5"],
+              loaders: ["forge"],
+              files: [{ primary: true, filename: "ab.jar", size: 500, url: "https://cdn/ab.jar" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/dep-abandoned/version")) {
+          // Zero compatible versions for 1.21.1
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [],
+          }
+        }
+        if (u.includes("/project/dep-abandoned")) {
+          return { ok: true, status: 200, json: async () => ({ id: "dep-abandoned", title: "Abandoned Mod", project_type: "mod" }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-no-compat-dep",
+        versionId: "ver-root-nc",
+        contentType: "MOD",
+      })
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts.length).toBe(0)
+      expect(plan.items.length).toBe(1)
+      expect(plan.unresolvedDependencies.length).toBe(1)
+      expect(plan.unresolvedDependencies[0]?.projectId).toBe("dep-abandoned")
+      expect(plan.unresolvedDependencies[0]?.projectName).toBe("Abandoned Mod")
+      expect(plan.unresolvedDependencies[0]?.reason).toContain("No se encontró ninguna versión compatible")
+      expect(plan.warnings.length).toBe(1)
+      expect(plan.warnings[0]).toContain("No se encontró versión compatible")
+    })
+
+    it("resolveInstallationPlan with includeAllVersions fetches all versions for unresolved dependency", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-with-allver/version")) {
+          if (u.includes("game_versions")) {
+            return {
+              ok: true,
+              status: 200,
+              json: async () => [
+                {
+                  id: "ver-root-av",
+                  name: "Root AV",
+                  version_number: "1.0.0",
+                  game_versions: ["1.21.1"],
+                  loaders: ["neoforge"],
+                  files: [{ primary: true, filename: "root-av.jar", size: 1000, url: "https://cdn/root-av.jar" }],
+                  dependencies: [
+                    { project_id: "dep-multiver", version_id: "ver-multi-old", dependency_type: "required" },
+                  ],
+                },
+              ],
+            }
+          }
+        }
+        if (u.includes("/project/root-with-allver")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-with-allver", title: "Root AV", project_type: "mod" }) }
+        }
+        if (u.includes("/version/ver-multi-old")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-multi-old",
+              project_id: "dep-multiver",
+              name: "Multi 1.0",
+              game_versions: ["1.20.1"],
+              loaders: ["neoforge"],
+              files: [{ primary: true, filename: "multi.jar", size: 500, url: "https://cdn/multi.jar" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/dep-multiver/version")) {
+          if (u.includes("game_versions")) {
+            // 0 compatible versions for 1.21.1
+            return { ok: true, status: 200, json: async () => [] }
+          }
+          // getProjectVersions (without game_versions filter)
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-multi-120",
+                name: "Multi 1.20.1",
+                version_number: "1.20.1-1.0",
+                game_versions: ["1.20.1"],
+                loaders: ["neoforge"],
+                files: [{ primary: true, filename: "multi-120.jar", size: 500, url: "https://cdn/multi-120.jar" }],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/dep-multiver")) {
+          return { ok: true, status: 200, json: async () => ({ id: "dep-multiver", title: "Multi Mod", project_type: "mod" }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-with-allver",
+        versionId: "ver-root-av",
+        contentType: "MOD",
+        includeAllVersions: true,
+      })
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.unresolvedDependencies.length).toBe(1)
+      expect(plan.unresolvedDependencies[0]?.allVersions?.length).toBe(1)
+      expect(plan.unresolvedDependencies[0]?.allVersions?.[0]?.id).toBe("ver-multi-120")
+    })
+
+    it("resolveInstallationPlan respects authoritative manualOverrides and forces version via getVersion with warning", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/project/root-with-override/version")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              {
+                id: "ver-root-ov",
+                name: "Root OV",
+                version_number: "1.0.0",
+                game_versions: ["1.21.1"],
+                loaders: ["neoforge"],
+                files: [{ primary: true, filename: "root-ov.jar", size: 1000, url: "https://cdn/root-ov.jar" }],
+                dependencies: [
+                  { project_id: "dep-forced", dependency_type: "required" },
+                ],
+              },
+            ],
+          }
+        }
+        if (u.includes("/project/root-with-override")) {
+          return { ok: true, status: 200, json: async () => ({ id: "root-with-override", title: "Root OV", project_type: "mod" }) }
+        }
+        if (u.includes("/project/dep-forced/version")) {
+          // getCompatibleVersions returns empty (e.g. no official compatible version)
+          return { ok: true, status: 200, json: async () => [] }
+        }
+        if (u.includes("/version/ver-forced-special")) {
+          // getVersion succeeds for the manual override
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: "ver-forced-special",
+              project_id: "dep-forced",
+              name: "Special Forced 9.9",
+              version_number: "9.9.0",
+              game_versions: ["1.21.0"],
+              loaders: ["neoforge"],
+              files: [{ primary: true, filename: "special-forced.jar", size: 777, url: "https://cdn/special.jar" }],
+              dependencies: [],
+            }),
+          }
+        }
+        if (u.includes("/project/dep-forced")) {
+          return { ok: true, status: 200, json: async () => ({ id: "dep-forced", title: "Forced Mod", project_type: "mod" }) }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(env, db, {
+        provider: "MODRINTH",
+        projectId: "root-with-override",
+        versionId: "ver-root-ov",
+        contentType: "MOD",
+        manualOverrides: [
+          {
+            provider: "MODRINTH",
+            projectId: "dep-forced",
+            versionId: "ver-forced-special",
+            contentType: "MOD",
+          },
+        ],
+      })
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts.length).toBe(0)
+      expect(plan.items.length).toBe(2)
+      expect(plan.items[1]?.versionId).toBe("ver-forced-special")
+      expect(plan.warnings.length).toBe(1)
+      expect(plan.warnings[0]).toContain("Se forzó manualmente la versión")
+    })
+
+    it("CurseForge adapter maps relationType 1 and 3 to REQUIRED, 2 to OPTIONAL, 5 to INCOMPATIBLE, and skips 4 and 6", async () => {
+      const cfAdapter = new CurseForgeAdapter()
+      const mockCfEnv = {
+        CURSEFORGE_API_KEY: "test-cf-key",
+      } as any
+
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/mods/123456/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 99991,
+                  displayName: "CF File with mixed relations",
+                  fileName: "cf-relations.jar",
+                  fileLength: 5000,
+                  gameVersions: ["1.21.1", "NeoForge"],
+                  dependencies: [
+                    { modId: 101, relationType: 1 }, // EmbeddedLibrary -> REQUIRED
+                    { modId: 102, relationType: 2 }, // OptionalDependency -> OPTIONAL
+                    { modId: 103, relationType: 3 }, // RequiredDependency -> REQUIRED
+                    { modId: 104, relationType: 4 }, // Tool -> omit
+                    { modId: 105, relationType: 5 }, // Incompatible -> INCOMPATIBLE
+                    { modId: 106, relationType: 6 }, // Include -> omit
+                  ],
+                },
+              ],
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const versions = await cfAdapter.getCompatibleVersions(
+        mockCfEnv,
+        "123456",
+        "1.21.1",
+        "neoforge",
+        "MOD",
+      )
+
+      expect(versions.length).toBe(1)
+      const deps = versions[0]?.dependencies || []
+      expect(deps.length).toBe(4) // 101, 102, 103, 105 (104 and 106 skipped!)
+
+      const dep101 = deps.find((d) => d.projectId === "101")
+      expect(dep101?.dependencyType).toBe("REQUIRED")
+
+      const dep102 = deps.find((d) => d.projectId === "102")
+      expect(dep102?.dependencyType).toBe("OPTIONAL")
+
+      const dep103 = deps.find((d) => d.projectId === "103")
+      expect(dep103?.dependencyType).toBe("REQUIRED")
+
+      const dep105 = deps.find((d) => d.projectId === "105")
+      expect(dep105?.dependencyType).toBe("INCOMPATIBLE")
+
+      expect(deps.some((d) => d.projectId === "104")).toBe(false)
+      expect(deps.some((d) => d.projectId === "106")).toBe(false)
+    })
+
+    it("CurseForge adapter getProjectVersions paginates /mods/{id}/files up to totalCount", async () => {
+      const cfAdapter = new CurseForgeAdapter()
+      const mockCfEnv = {
+        CURSEFORGE_API_KEY: "test-cf-key",
+      } as any
+
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("index=0")) {
+          const page1Files = Array.from({ length: 50 }, (_, i) => ({
+            id: 1000 + i,
+            displayName: `File ${i}`,
+            fileName: `file-${i}.jar`,
+            gameVersions: ["1.21.1"],
+            dependencies: [],
+          }))
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: page1Files,
+              pagination: { index: 0, pageSize: 50, resultCount: 50, totalCount: 65 },
+            }),
+          }
+        }
+        if (u.includes("index=50")) {
+          const page2Files = Array.from({ length: 15 }, (_, i) => ({
+            id: 1050 + i,
+            displayName: `File ${50 + i}`,
+            fileName: `file-${50 + i}.jar`,
+            gameVersions: ["1.21.1"],
+            dependencies: [],
+          }))
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: page2Files,
+              pagination: { index: 50, pageSize: 50, resultCount: 15, totalCount: 65 },
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const allVersions = await cfAdapter.getProjectVersions(mockCfEnv, "999888", "MOD")
+      expect(allVersions.length).toBe(65)
+      expect(allVersions[0]?.id).toBe("1000")
+      expect(allVersions[64]?.id).toBe("1064")
+    })
+  })
 })
+
 

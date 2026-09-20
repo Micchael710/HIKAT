@@ -101,7 +101,6 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
   const [queuedOptionalIds, setQueuedOptionalIds] = useState<Set<string>>(new Set())
 
   const isCurseForgeModUnknown =
-    currentProvider === "CURSEFORGE" &&
     currentContentType === "MOD" &&
     (detail?.environment === "UNKNOWN" || !detail?.environment)
 
@@ -275,6 +274,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
             manualOverrides: overridesList.length > 0 ? overridesList : null,
             environmentOverride: isCurseForgeModUnknown ? selectedEnvironmentOverride : undefined,
             ...(loaderOverride ? { loaderOverride } : {}),
+            includeAllVersions: manualMode,
           },
           serverId,
         )
@@ -305,6 +305,7 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
     isServer,
     loaderOverride,
     isBothEnvironment,
+    manualMode,
   ])
 
   const handleInstallRelease = async () => {
@@ -905,6 +906,47 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                             </div>
                           </div>
                         </label>
+
+                        {/* SERVER OPTION */}
+                        <label
+                          data-testid="option-env-server"
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "12px",
+                            padding: "12px 14px",
+                            borderRadius: "12px",
+                            border: `1px solid ${
+                              selectedEnvironmentOverride === "SERVER" ? "#3ec4c0" : tokens.borderSubtle
+                            }`,
+                            backgroundColor:
+                              selectedEnvironmentOverride === "SERVER"
+                                ? isDark
+                                  ? "rgba(62, 196, 192, 0.1)"
+                                  : "rgba(62, 196, 192, 0.06)"
+                                : tokens.bgCardInner,
+                            cursor: "pointer",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <input
+                            type="radio"
+                            name="curseforge-env-game"
+                            value="SERVER"
+                            checked={selectedEnvironmentOverride === "SERVER"}
+                            onChange={() => setSelectedEnvironmentOverride("SERVER")}
+                            disabled={installing}
+                            style={{ marginTop: "3px", accentColor: "#3ec4c0" }}
+                          />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: "14px", fontWeight: "700", color: tokens.textPrimary }}>
+                              Solo servidor
+                            </div>
+                            <div style={{ fontSize: "12px", color: tokens.textSecondary, marginTop: "2px" }}>
+                              El mod se sincronizará exclusivamente con el servidor y se excluirá de la descarga del cliente.
+                            </div>
+                          </div>
+                        </label>
                       </>
                     )}
                   </div>
@@ -1266,6 +1308,107 @@ export const ModDetailModal: React.FC<ModDetailModalProps> = ({
                             <li key={i}>{c}</li>
                           ))}
                         </ul>
+                      </div>
+                    )}
+
+                    {/* Non-blocking warnings */}
+                    {plan && (plan as any).warnings && (plan as any).warnings.length > 0 && (
+                      <div
+                        data-testid="plan-warnings-alert"
+                        style={{
+                          marginTop: "12px",
+                          padding: "10px 14px",
+                          background: "rgba(245, 158, 11, 0.15)",
+                          border: "1px solid rgba(245, 158, 11, 0.3)",
+                          borderRadius: "8px",
+                          color: "#fde047",
+                          fontSize: "13px",
+                        }}
+                      >
+                        <strong>Advertencia:</strong>
+                        <ul style={{ margin: "6px 0 0 0", paddingLeft: "18px" }}>
+                          {(plan as any).warnings.map((w: string, i: number) => (
+                            <li key={i}>{w}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Unresolved Dependencies Section */}
+                    {plan && (plan as any).unresolvedDependencies && (plan as any).unresolvedDependencies.length > 0 && (
+                      <div
+                        data-testid="unresolved-dependencies-section"
+                        style={{
+                          marginTop: "12px",
+                          padding: "12px 14px",
+                          background: "rgba(245, 158, 11, 0.08)",
+                          border: "1px solid rgba(245, 158, 11, 0.25)",
+                          borderRadius: "8px",
+                        }}
+                      >
+                        <strong style={{ color: "#fbbf24", fontSize: "13px" }}>
+                          Dependencias no resueltas automáticamente:
+                        </strong>
+                        <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                          {(plan as any).unresolvedDependencies.map((unres: any, i: number) => {
+                            const displayName =
+                              unres.projectName || unres.projectId || unres.versionId || "Dependencia desconocida"
+                            const unresKey = unres.projectId
+                              ? `${unres.provider}:${unres.projectId}:${unres.contentType || ""}`
+                              : ""
+                            return (
+                              <div
+                                key={i}
+                                data-testid={`unresolved-dependency-${unres.projectId || unres.versionId || i}`}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  padding: "8px 10px",
+                                  background: "rgba(0, 0, 0, 0.2)",
+                                  borderRadius: "6px",
+                                  fontSize: "12px",
+                                }}
+                              >
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontWeight: "600", color: "#f3f4f6" }}>{displayName}</div>
+                                  <div style={{ color: "#9ca3af", fontSize: "11px", marginTop: "2px" }}>{unres.reason}</div>
+                                </div>
+                                {manualMode && unres.allVersions && unres.allVersions.length > 0 && unresKey && (
+                                  <select
+                                    data-testid={`select-unresolved-${unres.projectId || unres.versionId}`}
+                                    value={manualOverrides[unresKey] || ""}
+                                    onChange={(e) => {
+                                      if (e.target.value) {
+                                        setManualOverrides((prev) => ({
+                                          ...prev,
+                                          [unresKey]: e.target.value,
+                                        }))
+                                      }
+                                    }}
+                                    disabled={installing}
+                                    style={{
+                                      padding: "4px 8px",
+                                      background: "#1f2937",
+                                      border: "1px solid rgba(255, 255, 255, 0.15)",
+                                      borderRadius: "4px",
+                                      color: "#fff",
+                                      fontSize: "12px",
+                                      maxWidth: "200px",
+                                    }}
+                                  >
+                                    <option value="">Seleccionar versión...</option>
+                                    {unres.allVersions.map((v: any) => (
+                                      <option key={v.id || v.fileId} value={v.id || v.fileId || ""}>
+                                        {v.versionNumber} ({v.releaseType})
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
                       </div>
                     )}
                   </div>

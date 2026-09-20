@@ -277,7 +277,7 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
   })
 
   // Test 5: Game Flow rejects DATA_PACK and SERVER mods
-  it("resolveInstallationPlan for Game / Updates rejects DATA_PACK and SERVER mods", async () => {
+  it("resolveInstallationPlan for Game / Updates rejects DATA_PACK but allows SERVER mods", async () => {
     // 1. Attempting to add DATA_PACK in Game updates flow throws immediately
     await expect(
       manager.resolveInstallationPlan(
@@ -292,7 +292,7 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
       ),
     ).rejects.toThrow("Los Data Packs se administran exclusivamente desde Servidor → Archivos.")
 
-    // 2. Attempting to add SERVER-only mod in Game updates flow
+    // 2. SERVER mod in Game updates flow is allowed and marked as SERVER
     const mockServerOnlyProject = {
       provider: "MODRINTH" as const,
       projectId: "server-only-id",
@@ -332,18 +332,18 @@ describe("Shard 08D: Server Content Authority & Provider Separation Tests", () =
 
     vi.spyOn(manager, "getAdapter").mockReturnValue(mockAdapter as any)
 
-    await expect(
-      manager.resolveInstallationPlan(
-        mockEnv,
-        db,
-        {
-          provider: "MODRINTH",
-          projectId: "server-only-id",
-          versionId: "ver-srv-1",
-          contentType: "MOD",
-        },
-      ),
-    ).rejects.toThrow("Los mods exclusivos de servidor (SERVER) no corresponden al cliente")
+    const plan = await manager.resolveInstallationPlan(
+      mockEnv,
+      db,
+      {
+        provider: "MODRINTH",
+        projectId: "server-only-id",
+        versionId: "ver-srv-1",
+        contentType: "MOD",
+      },
+    )
+    expect(plan.isValid).toBe(true)
+    expect(plan.items[0]?.environment).toBe("SERVER")
   })
 
   // Test 6: Dependency Resolution Cycle Protection in Server Plan

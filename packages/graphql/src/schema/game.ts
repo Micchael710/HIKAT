@@ -457,13 +457,28 @@ export const gameTypeDefs = /* GraphQL */ `
   }
 
   """
+  Unresolved dependency that could not be automatically satisfied
+  """
+  type ModPlanUnresolvedDependency {
+    provider: ModProvider!
+    projectId: String
+    versionId: String
+    projectName: String
+    contentType: ContentType
+    reason: String!
+    allVersions: [ModProjectVersion!]
+  }
+
+  """
   Complete dependency installation plan calculated prior to download
   """
   type ModInstallationPlan {
     items: [ModInstallationPlanItem!]!
     totalDownloadSizeBytes: Int!
     conflicts: [String!]!
+    warnings: [String!]!
     optionalDependencies: [ModInstallationPlanItem!]!
+    unresolvedDependencies: [ModPlanUnresolvedDependency!]!
     isValid: Boolean!
   }
 
@@ -539,6 +554,7 @@ export const gameTypeDefs = /* GraphQL */ `
     manualOverrides: [ModVersionOverrideInput!]
     environmentOverride: ModEnvironment
     loaderOverride: GameModLoader
+    includeAllVersions: Boolean
   }
 
   input InstallModPlanInput {

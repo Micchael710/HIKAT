@@ -2611,6 +2611,7 @@ export const modProvidersApi = {
           }
           totalDownloadSizeBytes
           conflicts
+          warnings
           optionalDependencies {
             provider
             projectId
@@ -2622,6 +2623,27 @@ export const modProvidersApi = {
             sizeBytes
             contentType
             isInstalled
+          }
+          unresolvedDependencies {
+            provider
+            projectId
+            versionId
+            projectName
+            contentType
+            reason
+            allVersions {
+              id
+              fileId
+              versionNumber
+              name
+              releaseType
+              gameVersions
+              loaders
+              publishedAt
+              downloads
+              filename
+              sizeBytes
+            }
           }
           isValid
         }

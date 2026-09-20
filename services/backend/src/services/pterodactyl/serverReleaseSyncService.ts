@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull } from "drizzle-orm"
+import { eq, and, desc, isNull, inArray } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import { createGraphQLError } from "@hikat/graphql"
 import { validateGameFileBuffer, computeCanonicalFingerprint } from "@hikat/shared"
@@ -132,7 +132,7 @@ export async function getServerReleaseSyncPlan(
       and(
         eq(schema.gameReleaseFiles.releaseId, published.id),
         eq(schema.gameReleaseFiles.category, "MOD"),
-        eq(schema.gameReleaseFiles.sourceEnvironment, "BOTH"),
+        inArray(schema.gameReleaseFiles.sourceEnvironment, ["BOTH", "SERVER"]),
       ),
     )
     .all()
@@ -489,7 +489,7 @@ export async function applyServerReleaseSync(
         and(
           eq(schema.gameReleaseFiles.releaseId, published.id),
           eq(schema.gameReleaseFiles.category, "MOD"),
-          eq(schema.gameReleaseFiles.sourceEnvironment, "BOTH"),
+          inArray(schema.gameReleaseFiles.sourceEnvironment, ["BOTH", "SERVER"]),
         ),
       )
       .all()
@@ -778,7 +778,7 @@ export async function applyServerReleaseSync(
               versionId: desired.sourceVersionId,
               fileId: desired.sourceFileId || null,
               contentType: "MOD",
-              environment: "BOTH",
+              environment: desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH",
               targetPath: `mods/${desired.name}`,
               sha256: desired.sha256,
               sizeBytes: desired.sizeBytes,
@@ -810,7 +810,7 @@ export async function applyServerReleaseSync(
                 versionId: desired.sourceVersionId,
                 fileId: desired.sourceFileId || null,
                 contentType: "MOD",
-                environment: "BOTH",
+                environment: desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH",
                 targetPath: `mods/${desired.name}`,
                 sha256: desired.sha256,
                 sizeBytes: desired.sizeBytes,
@@ -830,7 +830,7 @@ export async function applyServerReleaseSync(
               versionId: desired.sourceVersionId,
               fileId: desired.sourceFileId || null,
               contentType: "MOD",
-              environment: "BOTH",
+              environment: desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH",
               targetPath: `mods/${desired.name}`,
               sha256: desired.sha256,
               sizeBytes: desired.sizeBytes,

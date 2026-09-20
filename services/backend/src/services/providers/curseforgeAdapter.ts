@@ -412,6 +412,77 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     }
   }
 
+  async getProjectVersions(
+    env: Env,
+    projectId: string,
+    contentType: ContentTypeGql = "MOD",
+  ): Promise<NormalizedModVersion[]> {
+    if (!this.isConfigured(env)) return []
+
+    const baseUrl = this.getBaseUrl(env)
+    const pageSize = 50
+    let index = 0
+    let totalCount = Infinity
+    const versions: NormalizedModVersion[] = []
+    const maxPages = 20
+    let pagesFetched = 0
+
+    while (index < totalCount && pagesFetched < maxPages) {
+      pagesFetched++
+      const params = new URLSearchParams({
+        index: String(index),
+        pageSize: String(pageSize),
+      })
+      const url = `${baseUrl}/mods/${encodeURIComponent(projectId)}/files?${params.toString()}`
+
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+      try {
+        const res = await fetch(url, {
+          headers: this.getHeaders(env),
+          signal: controller.signal,
+        })
+
+        if (!res.ok) {
+          break
+        }
+
+        const data = (await res.json()) as {
+          data?: Array<any>
+          pagination?: {
+            index?: number
+            pageSize?: number
+            resultCount?: number
+            totalCount?: number
+          }
+        }
+
+        const files = data.data || []
+        if (files.length === 0) {
+          break
+        }
+
+        for (const file of files) {
+          const v = await this.mapCurseForgeFile(env, projectId, file, "", contentType)
+          versions.push(v)
+        }
+
+        if (typeof data.pagination?.totalCount === "number") {
+          totalCount = data.pagination.totalCount
+        }
+
+        index += files.length
+      } catch {
+        break
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    }
+
+    return versions
+  }
+
   async getVersion(
     env: Env,
     versionId: string,
@@ -484,22 +555,28 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     else if (file.releaseType === 3) releaseType = "ALPHA"
 
     // Map dependencies
-    // FileRelationType: 1=Embedded, 2=Optional, 3=Required, 5=Incompatible, 6=Include
-    const dependencies: NormalizedModDependency[] = (file.dependencies || []).map((d: any) => {
+    // CurseForge FileRelationType:
+    // 1=EmbeddedLibrary (REQUIRED), 2=OptionalDependency (OPTIONAL), 3=RequiredDependency (REQUIRED),
+    // 4=Tool (skip/omit), 5=Incompatible (INCOMPATIBLE), 6=Include (skip/omit)
+    const dependencies: NormalizedModDependency[] = []
+    for (const d of file.dependencies || []) {
+      if (d.relationType === 4 || d.relationType === 6) {
+        continue
+      }
       let depType: ModDependencyTypeGql = "REQUIRED"
       if (d.relationType === 2) depType = "OPTIONAL"
       else if (d.relationType === 5) depType = "INCOMPATIBLE"
-      else if (d.relationType === 1 || d.relationType === 6) depType = "EMBEDDED"
+      else if (d.relationType === 1 || d.relationType === 3) depType = "REQUIRED"
 
-      return {
+      dependencies.push({
         projectId: String(d.modId),
         versionId: null,
         fileId: null,
         dependencyType: depType,
         projectName: null,
         fileName: null,
-      }
-    })
+      })
+    }
 
     const rawGameVersions: string[] = file.gameVersions || []
     const extractedLoaders: string[] = []

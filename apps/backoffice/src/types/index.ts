@@ -487,11 +487,23 @@ export interface ModInstallationPlanItem {
   availableCompatibleVersions: ModProjectVersion[]
 }
 
+export interface ModPlanUnresolvedDependency {
+  provider: ModProvider
+  projectId?: string | null
+  versionId?: string | null
+  projectName?: string | null
+  contentType?: ContentType | null
+  reason: string
+  allVersions?: ModProjectVersion[] | null
+}
+
 export interface ModInstallationPlan {
   items: ModInstallationPlanItem[]
   totalDownloadSizeBytes: number
   conflicts: string[]
+  warnings: string[]
   optionalDependencies: ModInstallationPlanItem[]
+  unresolvedDependencies: ModPlanUnresolvedDependency[]
   isValid: boolean
 }
 
@@ -519,6 +531,7 @@ export interface ResolveModPlanInput {
   manualOverrides?: ModVersionOverrideInput[] | null
   environmentOverride?: ModEnvironment | null
   loaderOverride?: GameModLoader | null
+  includeAllVersions?: boolean | null
 }
 
 export interface InstallModPlanInput {

@@ -481,6 +481,40 @@ export class ModrinthAdapter implements ModProviderAdapter {
     }
   }
 
+  async getProjectVersions(
+    env: Env,
+    projectId: string,
+    contentType: ContentTypeGql = "MOD",
+  ): Promise<NormalizedModVersion[]> {
+    const baseUrl = this.getBaseUrl(env)
+    const url = `${baseUrl}/project/${encodeURIComponent(projectId)}/version?include_changelog=false`
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "application/json",
+        },
+        signal: controller.signal,
+      })
+
+      if (!res.ok) {
+        return []
+      }
+
+      const data = await res.json()
+      const list = Array.isArray(data) ? data : data ? [data] : []
+      return list.map((v) => this.mapModrinthVersion(v, contentType))
+    } catch {
+      return []
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
   async getVersion(
     env: Env,
     versionId: string,

@@ -429,7 +429,7 @@ export function isClientGameReleaseFile(file: {
 /**
  * Checks if a release has any changes that must be physically applied to the server
  * compared to the current server managed content state.
- * Server-relevant files are MOD with sourceEnvironment === "BOTH".
+ * Server-relevant files are MOD with sourceEnvironment === "BOTH" or "SERVER".
  */
 export async function hasServerRelevantChanges(
   db: Database,
@@ -437,7 +437,10 @@ export async function hasServerRelevantChanges(
   serverId?: string | null,
 ): Promise<boolean> {
   const desiredBothMods = draftFiles.filter(
-    (f) => !f.isDirectory && f.category === "MOD" && f.sourceEnvironment === "BOTH",
+    (f) =>
+      !f.isDirectory &&
+      f.category === "MOD" &&
+      (f.sourceEnvironment === "BOTH" || f.sourceEnvironment === "SERVER"),
   )
 
   const queryConditions = [eq(schema.serverManagedContent.managementSource, "GAME_RELEASE")]

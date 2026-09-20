@@ -1002,11 +1002,23 @@ export interface ModInstallationPlanItemGql {
   availableCompatibleVersions: ModProjectVersionGql[]
 }
 
+export interface ModPlanUnresolvedDependencyGql {
+  provider: ModProviderGql
+  projectId?: string | null
+  versionId?: string | null
+  projectName?: string | null
+  contentType?: ContentTypeGql | null
+  reason: string
+  allVersions?: ModProjectVersionGql[] | null
+}
+
 export interface ModInstallationPlanGql {
   items: ModInstallationPlanItemGql[]
   totalDownloadSizeBytes: number
   conflicts: string[]
+  warnings: string[]
   optionalDependencies: ModInstallationPlanItemGql[]
+  unresolvedDependencies: ModPlanUnresolvedDependencyGql[]
   isValid: boolean
 }
 
@@ -1025,6 +1037,7 @@ export interface ResolveModPlanInputGql {
   manualOverrides?: ModVersionOverrideInputGql[] | null
   environmentOverride?: ModEnvironmentGql | null
   loaderOverride?: GameModLoaderGql | null
+  includeAllVersions?: boolean | null
 }
 
 export interface InstallModPlanInputGql {

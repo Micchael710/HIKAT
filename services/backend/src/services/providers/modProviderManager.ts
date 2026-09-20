@@ -15,6 +15,7 @@ import type {
   ModProjectDetailGql,
   ModInstallationPlanGql,
   ModInstallationPlanItemGql,
+  ModPlanUnresolvedDependencyGql,
   ResolveModPlanInputGql,
   ContentTypeGql,
   ModEnvironmentGql,
@@ -1782,6 +1783,8 @@ export class ModProviderManager {
     const itemsMap = new Map<string, ModInstallationPlanItemGql>()
     const optionalDepsMap = new Map<string, ModInstallationPlanItemGql>()
     const conflicts: string[] = []
+    const warnings: string[] = []
+    const unresolvedDependencies: ModPlanUnresolvedDependencyGql[] = []
     const visitedBranches = new Set<string>()
     const incompatibleRules: Array<{
       provider: ModProviderGql
@@ -1851,7 +1854,7 @@ export class ModProviderManager {
           )
         }
         const targetLoader = loader.trim().toLowerCase()
-        const displayLoader = formatModLoaderDisplayName(modLoader || loader)
+        const displayLoader = formatModLoaderDisplayName(effectiveLoader || loader)
         if (
           contentType === "MOD" &&
           (!directVersion.loaders ||
@@ -1885,25 +1888,17 @@ export class ModProviderManager {
     let rootEnv: ModEnvironmentGql | null = knownRootEnv
     if (contentType === "MOD") {
       if (input.provider === "CURSEFORGE" && !isKnownEnvironment(rootEnv)) {
-        if (input.environmentOverride === "CLIENT" || input.environmentOverride === "BOTH") {
+        if (
+          input.environmentOverride === "CLIENT" ||
+          input.environmentOverride === "BOTH" ||
+          input.environmentOverride === "SERVER"
+        ) {
           rootEnv = input.environmentOverride
-        } else if (input.environmentOverride === "SERVER") {
-          throw createGraphQLError(
-            "Los mods exclusivos de servidor (SERVER) no corresponden al cliente y se administran desde Servidor → Archivos.",
-            "VALIDATION_ERROR",
-          )
         } else if (!input.environmentOverride) {
           conflicts.push(
-            "Se requiere especificar el entorno de ejecución (Solo cliente o Cliente y servidor) para este mod de CurseForge.",
+            "Se requiere especificar el entorno de ejecución (Solo cliente, Cliente y servidor, o Solo servidor) para este mod de CurseForge.",
           )
         }
-      }
-
-      if (rootEnv === "SERVER") {
-        throw createGraphQLError(
-          "Los mods exclusivos de servidor (SERVER) no corresponden al cliente y se administran desde Servidor → Archivos.",
-          "VALIDATION_ERROR",
-        )
       }
     }
 
@@ -2025,6 +2020,14 @@ export class ModProviderManager {
           const candidate = await depAdapter.getProject(env, depProjectId).catch(() => null)
           if (candidate?.contentType) {
             supportedTypes = [candidate.contentType]
+          }
+        }
+        if (supportedTypes.length === 0) {
+          const manualOverride = input.manualOverrides?.find(
+            (o) => o.provider === current.provider && o.projectId === depProjectId && o.contentType,
+          )
+          if (manualOverride?.contentType) {
+            supportedTypes = [manualOverride.contentType]
           }
         }
 
@@ -2162,7 +2165,22 @@ export class ModProviderManager {
             depContentType,
           )
         } catch {
-          conflicts.push(`Error al consultar versiones para la dependencia "${dep.projectName || depProjectId}".`)
+          let allVersionsForDep: NormalizedModVersion[] | null = null
+          if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+            allVersionsForDep = await depAdapter
+              .getProjectVersions(env, depProjectId, depContentType)
+              .catch(() => null)
+          }
+          unresolvedDependencies.push({
+            provider: current.provider,
+            projectId: depProjectId || null,
+            versionId: pinnedId || null,
+            projectName: dep.projectName || null,
+            contentType: depContentType || null,
+            reason: `Error al consultar versiones para la dependencia "${dep.projectName || depProjectId}".`,
+            allVersions: allVersionsForDep && allVersionsForDep.length > 0 ? (allVersionsForDep as any) : null,
+          })
+          warnings.push(`Error al consultar versiones para la dependencia "${dep.projectName || depProjectId}".`)
           continue
         }
 
@@ -2178,49 +2196,79 @@ export class ModProviderManager {
             (v) => v.id === overrideVersionId || v.fileId === overrideVersionId,
           )
           if (!selectedDepVersion) {
-            conflicts.push(
-              `La versión manual seleccionada (${overrideVersionId}) para "${dep.projectName || depProjectId}" no es compatible con el entorno.`,
-            )
-            continue
+            const forcedVer = await depAdapter
+              .getVersion(env, overrideVersionId, depProjectId, depContentType)
+              .catch(() => null)
+            if (forcedVer) {
+              selectedDepVersion = forcedVer
+              warnings.push(
+                `Se forzó manualmente la versión "${forcedVer.versionNumber || forcedVer.id}" para "${depProject?.name || dep.projectName || depProjectId}". Verifique la compatibilidad en juego.`,
+              )
+            } else {
+              conflicts.push(
+                `La versión manual seleccionada (${overrideVersionId}) para "${dep.projectName || depProjectId}" no existe en el proveedor.`,
+              )
+              continue
+            }
           }
         } else if (pinnedId) {
-          // Priority 2: Explicitly pinned versionId by provider -> MUST MATCH pinned version, NO silent fallback!
+          // Priority 2: Explicitly pinned versionId by provider
           selectedDepVersion = depCompatibleVersions.find((v) => v.id === pinnedId || v.fileId === pinnedId)
 
           if (!selectedDepVersion) {
-            if (pinnedVersionObj) {
-              if (pinnedVersionObj.contentType && pinnedVersionObj.contentType !== depContentType) {
-                conflicts.push(
-                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" es de tipo ${pinnedVersionObj.contentType}, no ${depContentType}.`,
-                )
-              } else if (!pinnedVersionObj.gameVersions.includes(minecraftVersion)) {
-                conflicts.push(
-                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con Minecraft ${minecraftVersion}.`,
-                )
-              } else if (
-                depContentType === "MOD" &&
-                !pinnedVersionObj.loaders.map((l) => l.toLowerCase()).includes(depLoader.toLowerCase())
-              ) {
-                conflicts.push(
-                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con el loader ${formatModLoaderDisplayName(effectiveLoader || depLoader)}.`,
-                )
-              } else {
-                conflicts.push(
-                  `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no es compatible con Minecraft ${minecraftVersion}.`,
-                )
-              }
-            } else {
-              conflicts.push(
-                `Conflicto: la versión requerida "${pinnedId}" de "${dep.projectName || depProjectId}" no fue encontrada.`,
+            if (depCompatibleVersions.length > 0) {
+              const sorted = [...depCompatibleVersions].sort((a, b) => {
+                const rankA = a.releaseType === "RELEASE" ? 3 : a.releaseType === "BETA" ? 2 : 1
+                const rankB = b.releaseType === "RELEASE" ? 3 : b.releaseType === "BETA" ? 2 : 1
+                if (rankA !== rankB) return rankB - rankA
+                return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+              })
+              selectedDepVersion = sorted[0]!
+              warnings.push(
+                `El mod "${dep.projectName || depProjectId}" requería la versión "${pinnedId}", pero no es compatible con Minecraft ${minecraftVersion}. Se seleccionó automáticamente la versión compatible "${selectedDepVersion.versionNumber}".`,
               )
+            } else {
+              let allVersionsForDep: NormalizedModVersion[] | null = null
+              if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+                allVersionsForDep = await depAdapter
+                  .getProjectVersions(env, depProjectId, depContentType)
+                  .catch(() => null)
+              }
+              unresolvedDependencies.push({
+                provider: current.provider,
+                projectId: depProjectId || null,
+                versionId: pinnedId || null,
+                projectName: depProject?.name || dep.projectName || null,
+                contentType: depContentType || null,
+                reason: `No se encontró ninguna versión compatible con Minecraft ${minecraftVersion} y loader ${formatModLoaderDisplayName(effectiveLoader || depLoader)}.`,
+                allVersions: allVersionsForDep && allVersionsForDep.length > 0 ? (allVersionsForDep as any) : null,
+              })
+              warnings.push(
+                `No se encontró versión compatible para "${depProject?.name || dep.projectName || depProjectId}". Puede seleccionar una versión manualmente.`,
+              )
+              continue
             }
-            continue
           }
         } else {
           // Priority 3: Automatic selection (latest stable RELEASE, fallback to BETA/ALPHA)
           if (depCompatibleVersions.length === 0) {
-            conflicts.push(
-              `No se encontró ninguna versión compatible con Minecraft ${minecraftVersion} para la dependencia "${dep.projectName || depProjectId}".`,
+            let allVersionsForDep: NormalizedModVersion[] | null = null
+            if (input.includeAllVersions && typeof depAdapter.getProjectVersions === "function") {
+              allVersionsForDep = await depAdapter
+                .getProjectVersions(env, depProjectId, depContentType)
+                .catch(() => null)
+            }
+            unresolvedDependencies.push({
+              provider: current.provider,
+              projectId: depProjectId || null,
+              versionId: null,
+              projectName: depProject?.name || dep.projectName || null,
+              contentType: depContentType || null,
+              reason: `No se encontró ninguna versión compatible con Minecraft ${minecraftVersion} y loader ${formatModLoaderDisplayName(effectiveLoader || depLoader)}.`,
+              allVersions: allVersionsForDep && allVersionsForDep.length > 0 ? (allVersionsForDep as any) : null,
+            })
+            warnings.push(
+              `No se encontró versión compatible para "${depProject?.name || dep.projectName || depProjectId}". Puede seleccionar una versión manualmente.`,
             )
             continue
           }
@@ -2235,7 +2283,7 @@ export class ModProviderManager {
         }
 
         if (!selectedDepVersion) {
-          conflicts.push(`No se pudo resolver una versión válida para la dependencia "${dep.projectName || depProjectId}".`)
+          warnings.push(`No se pudo resolver una versión válida para la dependencia "${dep.projectName || depProjectId}".`)
           continue
         }
 
@@ -2249,13 +2297,6 @@ export class ModProviderManager {
         let depEnv: ModEnvironmentGql | null = knownDepEnv
         if (input.provider === "CURSEFORGE" && depContentType === "MOD" && !isKnownEnvironment(depEnv)) {
           depEnv = isKnownEnvironment(rootEnv) ? rootEnv : null
-        }
-
-        if (depContentType === "MOD" && depEnv === "SERVER") {
-          conflicts.push(
-            `Conflicto: la dependencia "${dep.projectName || depProjectId}" es un mod exclusivo de servidor y no corresponde al cliente.`,
-          )
-          continue
         }
 
         const finalDepContentType: ContentTypeGql = selectedDepVersion.contentType || depContentType
@@ -2336,13 +2377,13 @@ export class ModProviderManager {
             Boolean(rule.targetVersionId && draftMatch.sourceVersionId === rule.targetVersionId) ||
             Boolean(rule.targetFileId && draftMatch.sourceFileId && String(draftMatch.sourceFileId) === String(rule.targetFileId))
           if (isSameVersion) {
-            conflicts.push(
-              `Conflicto detectado: "${rule.sourceName}" declara incompatibilidad con la versión instalada de "${draftMatch.name}".`,
+            warnings.push(
+              `Incompatibilidad detectada: "${rule.sourceName}" declara incompatibilidad con la versión instalada de "${draftMatch.name}".`,
             )
           }
         } else {
-          conflicts.push(
-            `Conflicto detectado: "${rule.sourceName}" declara incompatibilidad con "${draftMatch.name}".`,
+          warnings.push(
+            `Incompatibilidad detectada: "${rule.sourceName}" declara incompatibilidad con "${draftMatch.name}".`,
           )
         }
       }
@@ -2357,13 +2398,13 @@ export class ModProviderManager {
             Boolean(rule.targetVersionId && planMatch.versionId === rule.targetVersionId) ||
             Boolean(rule.targetFileId && planMatch.fileId && String(planMatch.fileId) === String(rule.targetFileId))
           if (isSameVersion) {
-            conflicts.push(
-              `Conflicto detectado: "${rule.sourceName}" declara incompatibilidad con la versión seleccionada de "${planMatch.projectName}".`,
+            warnings.push(
+              `Incompatibilidad detectada: "${rule.sourceName}" declara incompatibilidad con la versión seleccionada de "${planMatch.projectName}".`,
             )
           }
         } else {
-          conflicts.push(
-            `Conflicto detectado: "${rule.sourceName}" declara incompatibilidad con "${planMatch.projectName}".`,
+          warnings.push(
+            `Incompatibilidad detectada: "${rule.sourceName}" declara incompatibilidad con "${planMatch.projectName}".`,
           )
         }
       }
@@ -2378,7 +2419,9 @@ export class ModProviderManager {
       items,
       totalDownloadSizeBytes,
       conflicts,
+      warnings,
       optionalDependencies: Array.from(optionalDepsMap.values()),
+      unresolvedDependencies,
       isValid: conflicts.length === 0,
     }
   }

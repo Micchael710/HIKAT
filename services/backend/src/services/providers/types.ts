@@ -101,6 +101,11 @@ export interface ModProviderAdapter {
     loader: string,
     contentType?: ContentTypeGql,
   ): Promise<NormalizedModVersion[]>
+  getProjectVersions?(
+    env: Env,
+    projectId: string,
+    contentType?: ContentTypeGql,
+  ): Promise<NormalizedModVersion[]>
   getVersion(
     env: Env,
     versionId: string,

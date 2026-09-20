@@ -1062,7 +1062,9 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ],
         totalDownloadSizeBytes: 18000000,
         conflicts: [],
+        warnings: [],
         optionalDependencies: [],
+        unresolvedDependencies: [],
         isValid: true,
       })
 
@@ -1272,6 +1274,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ],
         totalDownloadSizeBytes: 50000,
         conflicts: [],
+        warnings: [],
         optionalDependencies: [
           {
             provider: "MODRINTH",
@@ -1291,6 +1294,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
             availableCompatibleVersions: [],
           },
         ],
+        unresolvedDependencies: [],
         isValid: true,
       })
 
@@ -1417,7 +1421,9 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ],
         totalDownloadSizeBytes: 80000,
         conflicts: [],
+        warnings: [],
         optionalDependencies: [],
+        unresolvedDependencies: [],
         isValid: true,
       })
 
@@ -1571,7 +1577,9 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ],
         totalDownloadSizeBytes: 60000,
         conflicts: [],
+        warnings: [],
         optionalDependencies: [],
+        unresolvedDependencies: [],
         isValid: true,
       })
 
@@ -1701,7 +1709,9 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ],
         totalDownloadSizeBytes: 60000,
         conflicts: [],
+        warnings: [],
         optionalDependencies: [],
+        unresolvedDependencies: [],
         isValid: true,
       })
 
@@ -1879,7 +1889,9 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ],
         totalDownloadSizeBytes: 2000,
         conflicts: [],
+        warnings: [],
         optionalDependencies: [],
+        unresolvedDependencies: [],
         isValid: true,
       })
 
@@ -1982,6 +1994,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         ],
         totalDownloadSizeBytes: 1000,
         conflicts: [],
+        warnings: [],
         optionalDependencies: [
           {
             provider: "MODRINTH",
@@ -2006,6 +2019,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
             availableCompatibleVersions: [],
           },
         ],
+        unresolvedDependencies: [],
         isValid: true,
       })
 
@@ -2034,6 +2048,163 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       fireEvent.click(queueBtn)
       expect(onQueueModMock).not.toHaveBeenCalled()
+    })
+
+    it("ModDetailModal in Game View renders 3 environment options (CLIENT, BOTH, SERVER) for UNKNOWN mod", async () => {
+      vi.spyOn(graphqlClient, "getModProjectDetail").mockResolvedValue({
+        provider: "CURSEFORGE",
+        projectId: "cf-mod-unknown-3env",
+        name: "CF Unknown 3Env",
+        summary: "Summary",
+        description: "Description",
+        author: "Author",
+        downloads: 100,
+        contentType: "MOD",
+        environment: null,
+        compatibleVersions: [
+          {
+            id: "ver-1",
+            name: "v1.0",
+            versionNumber: "1.0.0",
+            releaseType: "RELEASE",
+            gameVersions: ["1.21.1"],
+            loaders: ["neoforge"],
+            publishedAt: new Date().toISOString(),
+            downloads: 50,
+            filename: "cf-mod.jar",
+            sizeBytes: 1000,
+            dependencies: [],
+          },
+        ],
+        isInstalled: false,
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+      })
+
+      const { ModDetailModal } = await import("./providers/ModDetailModal")
+
+      render(
+        <ModDetailModal
+          serverId="srv-1"
+          provider="CURSEFORGE"
+          projectId="cf-mod-unknown-3env"
+          contentType="MOD"
+          mode="RELEASE"
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByTestId("curseforge-environment-selector")).toBeDefined()
+      })
+
+      expect(screen.getByTestId("option-env-client")).toBeDefined()
+      expect(screen.getByTestId("option-env-both")).toBeDefined()
+      expect(screen.getByTestId("option-env-server")).toBeDefined()
+    })
+
+    it("ModDetailModal renders warnings alert and unresolved dependencies section, keeping install button enabled", async () => {
+      vi.spyOn(graphqlClient, "getModProjectDetail").mockResolvedValue({
+        provider: "MODRINTH",
+        projectId: "mod-with-warnings",
+        name: "Mod With Warnings",
+        summary: "Summary",
+        description: "Description",
+        author: "Author",
+        downloads: 100,
+        contentType: "MOD",
+        environment: "BOTH",
+        compatibleVersions: [
+          {
+            id: "ver-warn-1",
+            name: "v1.0",
+            versionNumber: "1.0.0",
+            releaseType: "RELEASE",
+            gameVersions: ["1.21.1"],
+            loaders: ["neoforge"],
+            publishedAt: new Date().toISOString(),
+            downloads: 50,
+            filename: "mod-warn.jar",
+            sizeBytes: 1000,
+            dependencies: [],
+          },
+        ],
+        isInstalled: false,
+        minecraftVersion: "1.21.1",
+        modLoader: "NEOFORGE",
+      })
+
+      vi.spyOn(graphqlClient, "resolveModInstallationPlan").mockResolvedValue({
+        items: [
+          {
+            provider: "MODRINTH",
+            projectId: "mod-with-warnings",
+            projectName: "Mod With Warnings",
+            versionId: "ver-warn-1",
+            fileId: "ver-warn-1",
+            versionNumber: "1.0.0",
+            filename: "mod-warn.jar",
+            sizeBytes: 1000,
+            sha256: "hash1",
+            contentType: "MOD",
+            environment: "BOTH",
+            logicalPath: "mods/mod-warn.jar",
+            isRoot: true,
+            isDependency: false,
+            isRequired: true,
+            isInstalled: false,
+            action: "INSTALL",
+            installedFileId: null,
+            installedVersionNumber: null,
+            availableCompatibleVersions: [],
+          },
+        ],
+        totalDownloadSizeBytes: 1000,
+        conflicts: [],
+        warnings: ["Advertencia: Se seleccionó automáticamente una versión compatible."],
+        optionalDependencies: [],
+        unresolvedDependencies: [
+          {
+            provider: "MODRINTH",
+            projectId: "dep-unresolved",
+            projectName: "Unresolved Mod",
+            versionId: null,
+            contentType: "MOD",
+            reason: "No se encontró ninguna versión compatible con Minecraft 1.21.1",
+            allVersions: [],
+          },
+        ],
+        isValid: true,
+      })
+
+      const { ModDetailModal } = await import("./providers/ModDetailModal")
+
+      render(
+        <ModDetailModal
+          serverId="srv-1"
+          provider="MODRINTH"
+          projectId="mod-with-warnings"
+          contentType="MOD"
+          mode="RELEASE"
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByTestId("plan-warnings-alert")).toBeDefined()
+        expect(screen.getByTestId("unresolved-dependencies-section")).toBeDefined()
+      })
+
+      expect(screen.getByText(/Advertencia: Se seleccionó automáticamente/)).toBeDefined()
+      expect(screen.getByText("Unresolved Mod")).toBeDefined()
+      expect(screen.getByText(/No se encontró ninguna versión compatible con Minecraft 1.21.1/)).toBeDefined()
+
+      // The normal install button must remain enabled since isValid is true
+      const installBtn = screen.getByTestId("button-confirm-install") as HTMLButtonElement
+      expect(installBtn.disabled).toBe(false)
+      expect(installBtn.textContent).toBe("Añadir a la actualización")
     })
 
     it("GameView with non-existent initialVersionId in handoff does not silently switch versions and blocks install", async () => {
