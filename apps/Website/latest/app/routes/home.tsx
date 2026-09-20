@@ -57,19 +57,22 @@ export default function Home() {
             {/* CAPA 2: Sharp HiKAT building, gear, banners & character detail in top-right (Image 4 composition) */}
             {content.journey.sectionBackgroundImage && (
               <div
-                className="absolute top-0 right-0 w-full lg:w-[65%] xl:w-[58%] h-[580px] sm:h-[640px] lg:h-[700px] pointer-events-none overflow-hidden"
+                className="absolute inset-0 pointer-events-none overflow-hidden"
                 style={{
                   maskImage:
-                    "radial-gradient(ellipse 75% 75% at 75% 35%, black 25%, rgba(0,0,0,0.85) 48%, rgba(0,0,0,0.2) 70%, transparent 88%)",
+                    "radial-gradient(ellipse 58% 52% at 82% 24%, black 25%, rgba(0,0,0,0.85) 50%, rgba(0,0,0,0.2) 70%, transparent 88%)",
                   WebkitMaskImage:
-                    "radial-gradient(ellipse 75% 75% at 75% 35%, black 25%, rgba(0,0,0,0.85) 48%, rgba(0,0,0,0.2) 70%, transparent 88%)",
+                    "radial-gradient(ellipse 58% 52% at 82% 24%, black 25%, rgba(0,0,0,0.85) 50%, rgba(0,0,0,0.2) 70%, transparent 88%)",
                 }}
               >
                 <div
-                  className="w-full h-full bg-no-repeat opacity-95 transition-all"
+                  className="absolute inset-0 bg-cover bg-no-repeat opacity-95 transition-all"
                   style={{
                     backgroundImage: `url(${content.journey.sectionBackgroundImage})`,
-                    backgroundPosition: content.journey.sectionFocusPosition || "right top",
+                    backgroundPosition:
+                      content.journey.sectionFocusPosition ||
+                      content.journey.sectionBackgroundPosition ||
+                      "right 5% top",
                     backgroundSize: content.journey.sectionFocusSize || "cover",
                   }}
                 />

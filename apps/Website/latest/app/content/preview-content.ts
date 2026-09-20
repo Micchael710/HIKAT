@@ -60,7 +60,7 @@ export const previewWebsiteContent: WebsiteContent = {
   journey: {
     sectionBackgroundImage: "/assets/backgrounds/journey-bg.jpg",
     sectionBackgroundPosition: "right 5% top",
-    sectionFocusPosition: "right top",
+    sectionFocusPosition: "right 5% top",
     sectionFocusSize: "cover",
     eyebrow: "CONSTRUYE SIN LÍMITES",
     title: "Comienza tu aventura",
