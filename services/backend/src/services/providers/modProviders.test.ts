@@ -898,6 +898,82 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(version?.hashes?.md5).toBe("md5hash1234567890")
     })
 
+    it("extracts environment BOTH, CLIENT, and SERVER from CurseForge files and sortableGameVersions", async () => {
+      const adapter = new CurseForgeAdapter()
+
+      // 1. File with Client and Server in gameVersions (BOTH)
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            id: 101,
+            fileName: "both.jar",
+            gameVersions: ["Client", "Server", "1.21.1", "NeoForge"],
+            hashes: [{ algo: 1, value: "a".repeat(40) }],
+            dependencies: [],
+          },
+        }),
+      })
+      const vBoth = await adapter.getVersion(env, "101", "388172", "MOD")
+      expect(vBoth?.environment).toBe("BOTH")
+
+      // 2. File with sortableGameVersions typeId 75208 (CLIENT)
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            id: 102,
+            fileName: "client.jar",
+            gameVersions: ["1.20.1", "Forge"],
+            sortableGameVersions: [
+              { gameVersionName: "Client", gameVersionTypeId: 75208 },
+              { gameVersionName: "1.20.1", gameVersionTypeId: 77784 },
+            ],
+            hashes: [{ algo: 1, value: "b".repeat(40) }],
+            dependencies: [],
+          },
+        }),
+      })
+      const vClient = await adapter.getVersion(env, "102", "581495", "MOD")
+      expect(vClient?.environment).toBe("CLIENT")
+
+      // 3. File with Server only in gameVersions (SERVER)
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            id: 103,
+            fileName: "server.jar",
+            gameVersions: ["Server", "1.20.1", "Forge"],
+            hashes: [{ algo: 1, value: "c".repeat(40) }],
+            dependencies: [],
+          },
+        }),
+      })
+      const vServer = await adapter.getVersion(env, "103", "1536005", "MOD")
+      expect(vServer?.environment).toBe("SERVER")
+
+      // 4. File without environment tags (null)
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            id: 104,
+            fileName: "untagged.jar",
+            gameVersions: ["1.21.1", "NeoForge"],
+            hashes: [{ algo: 1, value: "d".repeat(40) }],
+            dependencies: [],
+          },
+        }),
+      })
+      const vUntagged = await adapter.getVersion(env, "104", "908741", "MOD")
+      expect(vUntagged?.environment).toBeNull()
+    })
+
     it("fails closed on unknown CurseForge classId (does not return MOD or accept spoofing)", async () => {
       const adapter = new CurseForgeAdapter()
 
@@ -4381,6 +4457,56 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(plan.conflicts).toHaveLength(0)
       expect(plan.items).toHaveLength(1)
       expect(plan.items[0]?.environment).toBeNull()
+    })
+
+    it("resolveInstallationPlan automatically recognizes CurseForge file environment BOTH without requiring override", async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("api.curseforge.com/v1/mods/555555/files")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 10001,
+                  fileName: "cf-gecko.jar",
+                  downloadUrl: "https://cdn/cf-gecko.jar",
+                  gameVersions: ["Client", "Server", "1.21.1", "NeoForge"],
+                  hashes: [{ algo: 1, value: "abcdef1234567890abcdef1234567890abcdef12" }],
+                  dependencies: [],
+                },
+              ],
+            }),
+          }
+        }
+        if (u.includes("api.curseforge.com/v1/mods/555555")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: {
+                id: 555555,
+                name: "CF Gecko Mod",
+                classId: 6,
+                latestFiles: [{ gameVersions: ["Client", "Server", "1.21.1", "NeoForge"] }],
+              },
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const plan = await manager.resolveInstallationPlan(
+        env,
+        db,
+        { provider: "CURSEFORGE", projectId: "555555", versionId: "10001", contentType: "MOD" },
+      )
+
+      expect(plan.isValid).toBe(true)
+      expect(plan.conflicts).toHaveLength(0)
+      expect(plan.items).toHaveLength(1)
+      expect(plan.items[0]?.environment).toBe("BOTH")
     })
 
     it("resolveInstallationPlan applies CLIENT environmentOverride to root and inherits it to unknown CurseForge dependencies", async () => {

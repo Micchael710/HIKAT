@@ -38,6 +38,44 @@ const CURSEFORGE_LOADER_TYPE_MAP: Record<string, number> = {
   quilt: 5,
 }
 
+/**
+ * Extracts the environment (CLIENT, SERVER, BOTH) from a CurseForge file object.
+ * CurseForge represents environment compatibility for Minecraft (gameId: 432)
+ * using versionTypeId: 75208 ("Environment") with values "Client" and "Server",
+ * or directly inside the file's gameVersions array as "Client" and "Server".
+ */
+export function extractCurseForgeEnvironment(file?: {
+  gameVersions?: string[]
+  sortableGameVersions?: Array<{ gameVersionName?: string; gameVersionTypeId?: number }>
+} | null): ModEnvironmentGql | null {
+  if (!file) return null
+
+  let hasClient = false
+  let hasServer = false
+
+  if (Array.isArray(file.sortableGameVersions)) {
+    for (const sv of file.sortableGameVersions) {
+      const name = (sv.gameVersionName || "").toLowerCase()
+      if (sv.gameVersionTypeId === 75208 || name === "client" || name === "server") {
+        if (name === "client") hasClient = true
+        if (name === "server") hasServer = true
+      }
+    }
+  }
+
+  if (!hasClient && !hasServer && Array.isArray(file.gameVersions)) {
+    for (const gv of file.gameVersions) {
+      const lower = String(gv).toLowerCase()
+      if (lower === "client") hasClient = true
+      if (lower === "server") hasServer = true
+    }
+  }
+
+  if (hasClient && hasServer) return "BOTH"
+  if (hasClient) return "CLIENT"
+  if (hasServer) return "SERVER"
+  return null
+}
 
 export class CurseForgeAdapter implements ModProviderAdapter {
   readonly provider = "CURSEFORGE" as const
@@ -211,28 +249,42 @@ export class CurseForgeAdapter implements ModProviderAdapter {
           dateCreated?: string
           dateModified?: string
           classId?: number
+          latestFiles?: Array<any>
         }>
         pagination?: { totalCount?: number }
       }
 
-      const items: NormalizedModProject[] = (data.data || []).map((mod) => ({
-        provider: "CURSEFORGE",
-        projectId: String(mod.id),
-        slug: mod.slug,
-        name: mod.name,
-        summary: mod.summary || "",
-        description: mod.summary || "",
-        author: mod.authors?.map((a) => a.name).join(", ") || "Desconocido",
-        iconUrl: mod.logo?.url || null,
-        downloads: Number(mod.downloadCount || 0),
-        follows: null,
-        categories: mod.categories?.map((c) => c.name) || [],
-        contentType,
-        environment: null,
-        latestVersion: null,
-        publishedAt: mod.dateCreated || null,
-        updatedAt: mod.dateModified || null,
-      }))
+      const items: NormalizedModProject[] = (data.data || []).map((mod) => {
+        let projectEnv: ModEnvironmentGql | null = null
+        if (contentType === "MOD" && Array.isArray(mod.latestFiles)) {
+          for (const f of mod.latestFiles) {
+            const extracted = extractCurseForgeEnvironment(f)
+            if (extracted) {
+              projectEnv = extracted
+              break
+            }
+          }
+        }
+
+        return {
+          provider: "CURSEFORGE",
+          projectId: String(mod.id),
+          slug: mod.slug,
+          name: mod.name,
+          summary: mod.summary || "",
+          description: mod.summary || "",
+          author: mod.authors?.map((a) => a.name).join(", ") || "Desconocido",
+          iconUrl: mod.logo?.url || null,
+          downloads: Number(mod.downloadCount || 0),
+          follows: null,
+          categories: mod.categories?.map((c) => c.name) || [],
+          contentType,
+          environment: projectEnv,
+          latestVersion: null,
+          publishedAt: mod.dateCreated || null,
+          updatedAt: mod.dateModified || null,
+        }
+      })
 
       return {
         items,
@@ -281,6 +333,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
           dateModified?: string
           classId?: number
           mainCategoryId?: number
+          latestFiles?: Array<any>
         }
       }
 
@@ -298,6 +351,17 @@ export class CurseForgeAdapter implements ModProviderAdapter {
         return null
       }
 
+      let projectEnv: ModEnvironmentGql | null = null
+      if (discoveredType === "MOD" && Array.isArray(mod.latestFiles)) {
+        for (const f of mod.latestFiles) {
+          const extracted = extractCurseForgeEnvironment(f)
+          if (extracted) {
+            projectEnv = extracted
+            break
+          }
+        }
+      }
+
       return {
         provider: "CURSEFORGE",
         projectId: String(mod.id),
@@ -311,7 +375,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
         follows: null,
         categories: mod.categories?.map((c) => c.name) || [],
         contentType: discoveredType,
-        environment: null,
+        environment: projectEnv,
         publishedAt: mod.dateCreated || null,
         updatedAt: mod.dateModified || null,
       }
@@ -618,6 +682,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
     // Official CurseForge file hashes: algo 1 = SHA-1, algo 2 = MD5
     const sha1 = file.hashes?.find((h: any) => h.algo === 1)?.value || null
     const md5 = file.hashes?.find((h: any) => h.algo === 2)?.value || null
+    const environment = contentType === "MOD" ? extractCurseForgeEnvironment(file) : null
 
     return {
       id: String(file.id),
@@ -646,7 +711,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       },
       downloadUrl,
       contentType,
-      environment: null,
+      environment,
       dependencies,
     }
   }
