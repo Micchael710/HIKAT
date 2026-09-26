@@ -534,7 +534,11 @@ export async function createGameFileBatchUploadTokens(
   }
 
   if (insertStatements.length > 0) {
-    await db.batch(asBatchTuple(insertStatements))
+    const D1_BATCH_LIMIT = 80
+    for (let i = 0; i < insertStatements.length; i += D1_BATCH_LIMIT) {
+      const chunk = insertStatements.slice(i, i + D1_BATCH_LIMIT)
+      await db.batch(asBatchTuple(chunk))
+    }
   }
 
   return {
@@ -891,9 +895,13 @@ export async function completeGameFileBatchUploadTokens(
     )
   }
 
-  // 8. Execute all statements in single atomic db.batch()
+  // 8. Execute all statements in db.batch() in chunks of <= 80 statements (< 100 limit of D1)
   if (statements.length > 0) {
-    await db.batch(asBatchTuple(statements))
+    const D1_BATCH_LIMIT = 80
+    for (let i = 0; i < statements.length; i += D1_BATCH_LIMIT) {
+      const chunk = statements.slice(i, i + D1_BATCH_LIMIT)
+      await db.batch(asBatchTuple(chunk))
+    }
   }
 
   // 9. Clean up replaced R2 objects if unreferenced

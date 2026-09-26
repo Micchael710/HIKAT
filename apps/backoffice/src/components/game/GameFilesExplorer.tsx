@@ -569,63 +569,80 @@ export default function GameFilesExplorer({
         }
       })
 
-      // 2. Request batch upload tickets and scoped temporary credentials in 1 request
-      const batchPayload = await gameApi.createGameFileBatchUpload(
-        preparedItems.map((p) => ({
-          originalFilename: p.originalFilename,
-          logicalPath: p.logicalPath,
-          category: p.category,
-          sizeBytes: p.sizeBytes,
-        })),
-        serverId,
-      )
+      // Process files in micro-batches of 30 files to respect Cloudflare Workers Free
+      // limits (<= 50 subrequests per invocation) and Cloudflare D1 batch limits (<= 100 queries)
+      const UPLOAD_BATCH_CHUNK_SIZE = 30
+      let totalCompleted = 0
 
-      // 3. Upload files directly to R2 multipart with concurrency 10
-      const batchItems = preparedItems.map((p, idx) => ({
-        file: p.file,
-        uploadToken: batchPayload.items[idx]!.uploadToken,
-        objectKey: batchPayload.items[idx]!.objectKey,
-        expectedCategory: batchPayload.items[idx]!.expectedCategory as any,
-        name: p.file.name,
-        logicalPath: p.logicalPath,
-      }))
+      for (let i = 0; i < preparedItems.length; i += UPLOAD_BATCH_CHUNK_SIZE) {
+        const chunk = preparedItems.slice(i, i + UPLOAD_BATCH_CHUNK_SIZE)
 
-      const uploadedResults = await uploadGameFilesBatch(
-        batchItems,
-        {
-          endpoint: batchPayload.endpoint,
-          credentials: batchPayload.credentials,
-          bucket: batchPayload.bucket,
-        },
-        (progress) => {
-          setUploadProgress({
-            current: progress.completed,
-            total: progress.total,
-            filename: progress.currentFilename,
-          })
-        },
-      )
-
-      // 4. Complete batch on backend in 1 request
-      await gameApi.completeGameFileBatchUpload(
-        {
-          items: uploadedResults.map((u) => ({
-            uploadToken: u.uploadToken,
-            sha256: u.sha256,
-            sizeBytes: u.sizeBytes,
-            name: u.name,
-            logicalPath: u.logicalPath || undefined,
-            category: (u.category as any) || undefined,
-            explicitPolicy: u.explicitPolicy || undefined,
+        // 2. Request batch upload tickets and scoped temporary credentials for this chunk
+        const batchPayload = await gameApi.createGameFileBatchUpload(
+          chunk.map((p) => ({
+            originalFilename: p.originalFilename,
+            logicalPath: p.logicalPath,
+            category: p.category,
+            sizeBytes: p.sizeBytes,
           })),
-        },
-        serverId,
-      )
+          serverId,
+        )
+
+        // 3. Upload chunk files directly to R2 multipart with concurrency 10
+        const batchItems = chunk.map((p, idx) => ({
+          file: p.file,
+          uploadToken: batchPayload.items[idx]!.uploadToken,
+          objectKey: batchPayload.items[idx]!.objectKey,
+          expectedCategory: batchPayload.items[idx]!.expectedCategory as any,
+          name: p.file.name,
+          logicalPath: p.logicalPath,
+        }))
+
+        const uploadedResults = await uploadGameFilesBatch(
+          batchItems,
+          {
+            endpoint: batchPayload.endpoint,
+            credentials: batchPayload.credentials,
+            bucket: batchPayload.bucket,
+          },
+          (progress) => {
+            setUploadProgress({
+              current: totalCompleted + progress.completed,
+              total: preparedItems.length,
+              filename: progress.currentFilename,
+            })
+          },
+        )
+
+        // 4. Complete chunk batch on backend
+        await gameApi.completeGameFileBatchUpload(
+          {
+            items: uploadedResults.map((u) => ({
+              uploadToken: u.uploadToken,
+              sha256: u.sha256,
+              sizeBytes: u.sizeBytes,
+              name: u.name,
+              logicalPath: u.logicalPath || undefined,
+              category: (u.category as any) || undefined,
+              explicitPolicy: u.explicitPolicy || undefined,
+            })),
+          },
+          serverId,
+        )
+
+        totalCompleted += chunk.length
+        setUploadProgress({
+          current: totalCompleted,
+          total: preparedItems.length,
+          filename: chunk[chunk.length - 1]!.file.name,
+        })
+      }
 
       onToast(`${itemsToUpload.length} archivo(s) subido(s) exitosamente.`, "success")
       await onRefresh()
     } catch (err: unknown) {
       onToast(err instanceof Error ? err.message : "Error durante la subida.", "error")
+      await onRefresh()
     } finally {
       setIsUploading(false)
       setUploadProgress(null)

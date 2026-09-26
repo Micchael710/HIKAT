@@ -583,6 +583,76 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
     expect(onToast).toHaveBeenCalledWith("2 archivo(s) subido(s) exitosamente.", "success")
   })
 
+  it("chunks large folder uploads into micro-batches of 30 files", async () => {
+    const onToast = vi.fn()
+    const onRefresh = vi.fn()
+
+    const createBatchSpy = vi.spyOn(gameApi, "createGameFileBatchUpload").mockImplementation(async (items) => ({
+      batchId: "batch-chunked",
+      prefixPath: "game-files/batches/batch-chunked/",
+      expiresAt: new Date().toISOString(),
+      bucket: "hikat-r2",
+      endpoint: "https://r2.test",
+      credentials: { accessKeyId: "k", secretAccessKey: "s", sessionToken: "t" },
+      items: items.map((i, idx) => ({
+        uploadToken: `tok-${idx}`,
+        objectKey: `k-${idx}`,
+        expectedCategory: i.category as any,
+        originalFilename: i.originalFilename,
+        logicalPath: i.logicalPath,
+      })),
+    }))
+    const uploadBatchSpy = vi.spyOn(gameFileUploadService, "uploadGameFilesBatch").mockImplementation(async (items) => {
+      return items.map((i) => ({
+        uploadToken: i.uploadToken,
+        sha256: "test-sha",
+        sizeBytes: 10,
+        name: i.name,
+        logicalPath: i.logicalPath || undefined,
+        category: i.expectedCategory,
+      }))
+    })
+    const completeBatchSpy = vi.spyOn(gameApi, "completeGameFileBatchUpload").mockResolvedValue([])
+
+    const { container } = render(
+      <GameFilesExplorer
+        serverId="srv-1"
+        theme="dark"
+        files={[]}
+        isDraft={true}
+        onRefresh={onRefresh}
+        onToast={onToast}
+      />,
+    )
+
+    const inputs = container.querySelectorAll("input[type=\"file\"]")
+    const folderInput = Array.from(inputs).find((i) => i.hasAttribute("webkitdirectory")) as HTMLInputElement
+    expect(folderInput).toBeDefined()
+
+    // Create 75 files (should result in 3 chunks: 30, 30, 15)
+    const files = Array.from({ length: 75 }, (_, i) => {
+      const f = new File([`content-${i}`], `file-${i}.txt`)
+      Object.defineProperty(f, "webkitRelativePath", { value: `Pack/file-${i}.txt` })
+      return f
+    })
+
+    await act(async () => {
+      fireEvent.change(folderInput, {
+        target: { files },
+      })
+    })
+
+    expect(createBatchSpy).toHaveBeenCalledTimes(3)
+    expect(createBatchSpy.mock.calls[0]![0]).toHaveLength(30)
+    expect(createBatchSpy.mock.calls[1]![0]).toHaveLength(30)
+    expect(createBatchSpy.mock.calls[2]![0]).toHaveLength(15)
+
+    expect(uploadBatchSpy).toHaveBeenCalledTimes(3)
+    expect(completeBatchSpy).toHaveBeenCalledTimes(3)
+    expect(onToast).toHaveBeenCalledWith("75 archivo(s) subido(s) exitosamente.", "success")
+    expect(onRefresh).toHaveBeenCalled()
+  })
+
   it("handles recursive drag and drop of folders with FileSystemEntry and fallback", async () => {
     const onToast = vi.fn()
     const onRefresh = vi.fn()
