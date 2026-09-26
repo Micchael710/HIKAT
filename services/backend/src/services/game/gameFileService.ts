@@ -17,6 +17,7 @@ import type {
   CompleteGameFileUploadInputGql,
   GameFileUploadCompletePayloadGql,
   SyncPolicyGql,
+  ModEnvironmentGql,
 } from "@hikat/graphql"
 import {
   MAX_GAME_FILE_SIZE_BYTES,
@@ -754,6 +755,10 @@ export async function completeGameFileBatchUploadTokens(
     objectKey: string
     tokenHash?: string
     existingRecord?: schema.GameReleaseFile
+    environment?: ModEnvironmentGql | null
+    sourceProvider?: string | null
+    sourceProjectId?: string | null
+    sourceVersionId?: string | null
   }
 
   const preparedItems: PreparedBatchItem[] = []
@@ -816,6 +821,10 @@ export async function completeGameFileBatchUploadTokens(
       objectKey,
       tokenHash,
       existingRecord,
+      environment: item.environment || null,
+      sourceProvider: item.sourceProvider || null,
+      sourceProjectId: item.sourceProjectId || null,
+      sourceVersionId: item.sourceVersionId || null,
     })
   }
 
@@ -889,11 +898,11 @@ export async function completeGameFileBatchUploadTokens(
       policy: item.explicitPolicy,
       isDirectory: 0,
       objectKey: item.objectKey,
-      sourceProvider: null,
-      sourceProjectId: null,
-      sourceVersionId: null,
+      sourceProvider: item.sourceProvider || null,
+      sourceProjectId: item.sourceProjectId || null,
+      sourceVersionId: item.sourceVersionId || null,
       sourceFileId: null,
-      sourceEnvironment: null,
+      sourceEnvironment: item.environment || null,
       createdAt: nowIso,
     }))
     statements.push(db.insert(schema.gameReleaseFiles).values(chunk))
@@ -911,6 +920,22 @@ export async function completeGameFileBatchUploadTokens(
     const sizeCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.sizeBytes}`), sql` `)
     const policyCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.explicitPolicy}`), sql` `)
     const keyCases = sql.join(chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.objectKey}`), sql` `)
+    const envCases = sql.join(
+      chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.environment || c.existingRecord!.sourceEnvironment || null}`),
+      sql` `,
+    )
+    const provCases = sql.join(
+      chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.sourceProvider || c.existingRecord!.sourceProvider || null}`),
+      sql` `,
+    )
+    const projCases = sql.join(
+      chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.sourceProjectId || c.existingRecord!.sourceProjectId || null}`),
+      sql` `,
+    )
+    const verCases = sql.join(
+      chunk.map((c) => sql`WHEN ${schema.gameReleaseFiles.id} = ${c.existingRecord!.id} THEN ${c.sourceVersionId || c.existingRecord!.sourceVersionId || null}`),
+      sql` `,
+    )
 
     statements.push(
       db
@@ -922,11 +947,11 @@ export async function completeGameFileBatchUploadTokens(
           sizeBytes: sql`CASE ${sizeCases} ELSE ${schema.gameReleaseFiles.sizeBytes} END`,
           policy: sql`CASE ${policyCases} ELSE ${schema.gameReleaseFiles.policy} END`,
           objectKey: sql`CASE ${keyCases} ELSE ${schema.gameReleaseFiles.objectKey} END`,
-          sourceProvider: null,
-          sourceProjectId: null,
-          sourceVersionId: null,
+          sourceProvider: sql`CASE ${provCases} ELSE ${schema.gameReleaseFiles.sourceProvider} END`,
+          sourceProjectId: sql`CASE ${projCases} ELSE ${schema.gameReleaseFiles.sourceProjectId} END`,
+          sourceVersionId: sql`CASE ${verCases} ELSE ${schema.gameReleaseFiles.sourceVersionId} END`,
           sourceFileId: null,
-          sourceEnvironment: null,
+          sourceEnvironment: sql`CASE ${envCases} ELSE ${schema.gameReleaseFiles.sourceEnvironment} END`,
         })
         .where(inArray(schema.gameReleaseFiles.id, ids)),
     )
@@ -1145,7 +1170,7 @@ export async function addGameFile(
           sourceProjectId: null,
           sourceVersionId: null,
           sourceFileId: null,
-          sourceEnvironment: null,
+          sourceEnvironment: input.environment || null,
         })
         .where(eq(schema.gameReleaseFiles.id, existing.id))
 
@@ -1175,7 +1200,7 @@ export async function addGameFile(
         sourceProjectId: null,
         sourceVersionId: null,
         sourceFileId: null,
-        sourceEnvironment: null,
+        sourceEnvironment: input.environment || null,
         createdAt: now,
       }
 
@@ -1314,6 +1339,10 @@ export async function updateGameFile(
 
     if (input.explicitPolicy !== undefined) {
       updates.policy = input.explicitPolicy
+    }
+
+    if (input.environment !== undefined) {
+      updates.sourceEnvironment = input.environment || null
     }
 
     if (Object.keys(updates).length > 0) {

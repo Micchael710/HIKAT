@@ -1,8 +1,8 @@
 import React, { useState, useRef } from "react"
-import type { ThemeMode, AdminGameFile, GameFileCategory } from "../../types"
+import type { ThemeMode, AdminGameFile, GameFileCategory, ModEnvironment } from "../../types"
 import { sanitizeGameFileName } from "@hikat/shared"
 import { gameApi } from "../../services/graphqlClient"
-import { uploadGameFileDirect } from "../../services/gameFileUploadService"
+import { uploadGameFileDirect, computeJarHashes } from "../../services/gameFileUploadService"
 import { getThemeTokens } from "../../theme/tokens"
 import { IconCross, IconUpload, IconSpinner, IconBox } from "../../theme/icons"
 import BackofficeSelect, { SelectOption } from "../common/BackofficeSelect"
@@ -36,6 +36,11 @@ export default function AddGameFileModal({
 
   const [name, setName] = useState(targetFile?.name || "")
   const [category, setCategory] = useState<GameFileCategory>(targetFile?.category || "MOD")
+  const [environment, setEnvironment] = useState<ModEnvironment>(
+    (targetFile?.sourceEnvironment as ModEnvironment) || "BOTH",
+  )
+  const [detectedInfo, setDetectedInfo] = useState<string | null>(null)
+  const [isDetecting, setIsDetecting] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -43,7 +48,7 @@ export default function AddGameFileModal({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
@@ -55,6 +60,37 @@ export default function AddGameFileModal({
         .replace(/[-_]/g, " ")
 
       setName(clean)
+    }
+
+    if (file.name.toLowerCase().endsWith(".jar") || category === "MOD") {
+      setIsDetecting(true)
+      setDetectedInfo(null)
+      try {
+        const { sha1, cfFingerprint } = await computeJarHashes(file)
+        const res = await gameApi.resolveUploadedModEnvironments([
+          {
+            id: "1",
+            filename: file.name,
+            sha1,
+            curseforgeFingerprint: cfFingerprint,
+          },
+        ])
+        if (res && res[0]?.environment) {
+          setEnvironment(res[0].environment)
+          const provName = res[0].provider === "MODRINTH" ? "Modrinth" : "CurseForge"
+          const envName =
+            res[0].environment === "BOTH"
+              ? "Cliente y Servidor"
+              : res[0].environment === "SERVER"
+              ? "Solo Servidor"
+              : "Solo Cliente"
+          setDetectedInfo(`Detectado vía ${provName}: ${envName}`)
+        }
+      } catch {
+        // Fallback to manual environment selection
+      } finally {
+        setIsDetecting(false)
+      }
     }
   }
 
@@ -108,6 +144,7 @@ export default function AddGameFileModal({
           name: name.trim(),
           category,
           tokenHash: tokenHash!,
+          environment: category === "MOD" ? environment : undefined,
         }, serverId)
       }
 
@@ -119,6 +156,7 @@ export default function AddGameFileModal({
       setIsSubmitting(false)
     }
   }
+
 
   return (
     <div
@@ -330,6 +368,160 @@ export default function AddGameFileModal({
               options={CATEGORY_OPTIONS}
             />
           </div>
+
+          {/* Environment Selector for MODs */}
+          {category === "MOD" && (
+            <div style={{ marginBottom: "20px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "8px",
+                }}
+              >
+                <label
+                  style={{
+                    fontSize: "13px",
+                    fontWeight: "600",
+                    color: tokens.textSecondary,
+                  }}
+                >
+                  Entorno del mod
+                </label>
+                {isDetecting && (
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      color: tokens.textMuted,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    }}
+                  >
+                    <IconSpinner size={12} className="animate-spin" /> Identificando por hashes...
+                  </span>
+                )}
+                {detectedInfo && (
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      color: "#3ec4c0",
+                      fontWeight: "600",
+                    }}
+                  >
+                    ✓ {detectedInfo}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    padding: "8px 12px",
+                    borderRadius: "10px",
+                    border: `1px solid ${environment === "BOTH" ? "#3ec4c0" : tokens.borderSubtle}`,
+                    backgroundColor:
+                      environment === "BOTH"
+                        ? isDark
+                          ? "rgba(62, 196, 192, 0.1)"
+                          : "#f0fdfa"
+                        : tokens.bgCardInner,
+                    cursor: "pointer",
+                    fontSize: "13px",
+                    color: tokens.textPrimary,
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="mod-environment"
+                    value="BOTH"
+                    checked={environment === "BOTH"}
+                    onChange={() => setEnvironment("BOTH")}
+                    style={{ accentColor: "#3ec4c0" }}
+                  />
+                  <div>
+                    <strong>Cliente y Servidor (BOTH)</strong>
+                    <div style={{ fontSize: "11px", color: tokens.textSecondary }}>
+                      Recomendado para la mayoría de mods con bloques, items o mecánicas.
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    padding: "8px 12px",
+                    borderRadius: "10px",
+                    border: `1px solid ${environment === "CLIENT" ? "#3ec4c0" : tokens.borderSubtle}`,
+                    backgroundColor:
+                      environment === "CLIENT"
+                        ? isDark
+                          ? "rgba(62, 196, 192, 0.1)"
+                          : "#f0fdfa"
+                        : tokens.bgCardInner,
+                    cursor: "pointer",
+                    fontSize: "13px",
+                    color: tokens.textPrimary,
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="mod-environment"
+                    value="CLIENT"
+                    checked={environment === "CLIENT"}
+                    onChange={() => setEnvironment("CLIENT")}
+                    style={{ accentColor: "#3ec4c0" }}
+                  />
+                  <div>
+                    <strong>Solo Cliente (CLIENT)</strong>
+                    <div style={{ fontSize: "11px", color: tokens.textSecondary }}>
+                      Solo jugadores (minimapas, JEI/REI, shaders, interfaz visual).
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    padding: "8px 12px",
+                    borderRadius: "10px",
+                    border: `1px solid ${environment === "SERVER" ? "#3ec4c0" : tokens.borderSubtle}`,
+                    backgroundColor:
+                      environment === "SERVER"
+                        ? isDark
+                          ? "rgba(62, 196, 192, 0.1)"
+                          : "#f0fdfa"
+                        : tokens.bgCardInner,
+                    cursor: "pointer",
+                    fontSize: "13px",
+                    color: tokens.textPrimary,
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="mod-environment"
+                    value="SERVER"
+                    checked={environment === "SERVER"}
+                    onChange={() => setEnvironment("SERVER")}
+                    style={{ accentColor: "#3ec4c0" }}
+                  />
+                  <div>
+                    <strong>Solo Servidor (SERVER)</strong>
+                    <div style={{ fontSize: "11px", color: tokens.textSecondary }}>
+                      Exclusivo para el servidor (herramientas administrativas, permisos).
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          )}
 
           {/* Footer Actions */}
           <div

@@ -717,4 +717,65 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       dependencies,
     }
   }
+
+  async resolveFingerprints(
+    env: Env,
+    fingerprints: number[],
+  ): Promise<Map<number, { projectId: string; versionId: string; environment: ModEnvironmentGql | null }>> {
+    const resultMap = new Map<number, { projectId: string; versionId: string; environment: ModEnvironmentGql | null }>()
+    if (!this.isConfigured(env) || !fingerprints || fingerprints.length === 0) return resultMap
+
+    const baseUrl = this.getBaseUrl(env)
+    const BATCH_SIZE = 500
+
+    for (let i = 0; i < fingerprints.length; i += BATCH_SIZE) {
+      const chunk = fingerprints.slice(i, i + BATCH_SIZE)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+      try {
+        const res = await fetch(`${baseUrl}/fingerprints/${MINECRAFT_GAME_ID}`, {
+          method: "POST",
+          headers: this.getHeaders(env),
+          body: JSON.stringify({ fingerprints: chunk }),
+          signal: controller.signal,
+        })
+        if (res.ok) {
+          const json = (await res.json()) as {
+            data?: {
+              exactMatches?: Array<{
+                exactFingerprint?: number
+                file?: {
+                  id: number
+                  modId: number
+                  packageFingerprint?: number
+                  gameVersions?: string[]
+                  sortableGameVersions?: Array<{ gameVersionName?: string; gameVersionTypeId?: number }>
+                }
+              }>
+            }
+          }
+
+          const matches = json.data?.exactMatches || []
+          for (const match of matches) {
+            const fp = match.exactFingerprint || match.file?.packageFingerprint
+            if (fp && match.file && match.file.modId && match.file.id) {
+              const envVal = extractCurseForgeEnvironment(match.file)
+              resultMap.set(fp, {
+                projectId: String(match.file.modId),
+                versionId: String(match.file.id),
+                environment: envVal,
+              })
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[CurseForgeAdapter] Error in /fingerprints batch:", err)
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    }
+
+    return resultMap
+  }
 }

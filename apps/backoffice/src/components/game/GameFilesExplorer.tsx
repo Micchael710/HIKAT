@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
-import type { ThemeMode, AdminGameFile, SyncPolicy } from "../../types"
+import type { ThemeMode, AdminGameFile, SyncPolicy, ModEnvironment, GameFileCategory, ModProvider } from "../../types"
 import { gameApi } from "../../services/graphqlClient"
-import { uploadGameFileDirect, uploadGameFilesBatch } from "../../services/gameFileUploadService"
+import { uploadGameFileDirect, uploadGameFilesBatch, computeJarHashes } from "../../services/gameFileUploadService"
 import {
   formatBytesToHuman,
   isEditableTextFile,
@@ -36,6 +36,7 @@ import ConfirmDeleteModal from "./ConfirmDeleteModal"
 import { ModSearchModal } from "./providers/ModSearchModal"
 import { getThemeTokens } from "../../theme/tokens"
 import GameEnvironmentModal from "./GameEnvironmentModal"
+import UnresolvedModEnvironmentModal from "./UnresolvedModEnvironmentModal"
 
 interface GameFilesExplorerProps {
   theme: ThemeMode
@@ -170,6 +171,10 @@ export default function GameFilesExplorer({
     isEnvironmentModalOpen,
     setIsEnvironmentModalOpen,
   ] = useState(false)
+  const [unresolvedModal, setUnresolvedModal] = useState<{
+    mods: Array<{ logicalPath: string; filename: string }>
+    resolve: (envs: Record<string, ModEnvironment> | null) => void
+  } | null>(null)
 
   // Uploading state
   const [isUploading, setIsUploading] = useState(false)
@@ -546,7 +551,17 @@ export default function GameFilesExplorer({
 
     try {
       // 1. Prepare items metadata
-      const preparedItems = itemsToUpload.map((item) => {
+      const preparedItems: Array<{
+        file: File
+        originalFilename: string
+        logicalPath: string
+        category: GameFileCategory
+        sizeBytes: number
+        environment?: ModEnvironment | null
+        sourceProvider?: ModProvider | null
+        sourceProjectId?: string | null
+        sourceVersionId?: string | null
+      }> = itemsToUpload.map((item) => {
         const file = item.file
         let targetLogicalPath: string
         if (item.relativePath) {
@@ -568,6 +583,118 @@ export default function GameFilesExplorer({
           sizeBytes: file.size,
         }
       })
+
+      // 1b. Auto-detect environment for mods using Modrinth and CurseForge hashes
+      const modItems = preparedItems.filter(
+        (p) => p.category === "MOD" || p.file.name.toLowerCase().endsWith(".jar"),
+      )
+
+      if (modItems.length > 0) {
+        setUploadProgress({
+          current: 0,
+          total: preparedItems.length,
+          filename: "Detectando entorno de mods...",
+        })
+
+        try {
+          const hashItems = await Promise.all(
+            modItems.map(async (m) => {
+              try {
+                const { sha1, cfFingerprint } = await computeJarHashes(m.file)
+                return {
+                  id: m.logicalPath,
+                  filename: m.originalFilename,
+                  sha1,
+                  curseforgeFingerprint: cfFingerprint,
+                }
+              } catch {
+                return {
+                  id: m.logicalPath,
+                  filename: m.originalFilename,
+                  sha1: "",
+                }
+              }
+            }),
+          )
+
+          const resolvedList = await gameApi.resolveUploadedModEnvironments(hashItems)
+          const resolvedMap = new Map<string, (typeof resolvedList)[0]>()
+          for (const res of resolvedList) {
+            if (res.environment) {
+              resolvedMap.set(res.id, res)
+            }
+          }
+
+          const unresolvedMods: Array<{ logicalPath: string; filename: string }> = []
+          for (const m of modItems) {
+            const res = resolvedMap.get(m.logicalPath)
+            if (res && res.environment) {
+              m.environment = res.environment
+              m.sourceProvider = res.provider as any
+              m.sourceProjectId = res.projectId
+              m.sourceVersionId = res.versionId
+            } else {
+              unresolvedMods.push({
+                logicalPath: m.logicalPath,
+                filename: m.originalFilename,
+              })
+            }
+          }
+
+          // Fallback: ask the user for environment of unresolved mods
+          if (unresolvedMods.length > 0) {
+            const userChoices = await new Promise<Record<string, ModEnvironment> | null>(
+              (resolve) => {
+                setUnresolvedModal({
+                  mods: unresolvedMods,
+                  resolve,
+                })
+              },
+            )
+
+            if (!userChoices) {
+              setIsUploading(false)
+              setUploadProgress(null)
+              if (fileInputRef.current) fileInputRef.current.value = ""
+              if (folderInputRef.current) folderInputRef.current.value = ""
+              return
+            }
+
+            for (const m of modItems) {
+              if (!m.environment && userChoices[m.logicalPath]) {
+                m.environment = userChoices[m.logicalPath]
+              }
+            }
+          }
+        } catch {
+          // If hash resolution fails completely, fallback to asking for all mod items
+          const unresolvedMods = modItems.map((m) => ({
+            logicalPath: m.logicalPath,
+            filename: m.originalFilename,
+          }))
+
+          const userChoices = await new Promise<Record<string, ModEnvironment> | null>(
+            (resolve) => {
+              setUnresolvedModal({
+                mods: unresolvedMods,
+                resolve,
+              })
+            },
+          )
+
+          if (!userChoices) {
+            setIsUploading(false)
+            setUploadProgress(null)
+            if (fileInputRef.current) fileInputRef.current.value = ""
+            if (folderInputRef.current) folderInputRef.current.value = ""
+            return
+          }
+
+          for (const m of modItems) {
+            m.environment = userChoices[m.logicalPath] || "BOTH"
+          }
+        }
+      }
 
       // Process files in micro-batches of 30 files to respect Cloudflare Workers Free
       // limits (<= 50 subrequests per invocation) and Cloudflare D1 batch limits (<= 100 queries)
@@ -596,6 +723,10 @@ export default function GameFilesExplorer({
           expectedCategory: batchPayload.items[idx]!.expectedCategory as any,
           name: p.file.name,
           logicalPath: p.logicalPath,
+          environment: p.environment,
+          sourceProvider: p.sourceProvider,
+          sourceProjectId: p.sourceProjectId,
+          sourceVersionId: p.sourceVersionId,
         }))
 
         const uploadedResults = await uploadGameFilesBatch(
@@ -625,6 +756,10 @@ export default function GameFilesExplorer({
               logicalPath: u.logicalPath || undefined,
               category: (u.category as any) || undefined,
               explicitPolicy: u.explicitPolicy || undefined,
+              environment: u.environment || undefined,
+              sourceProvider: u.sourceProvider || undefined,
+              sourceProjectId: u.sourceProjectId || undefined,
+              sourceVersionId: u.sourceVersionId || undefined,
             })),
           },
           serverId,
@@ -1647,6 +1782,21 @@ export default function GameFilesExplorer({
           onSuccess={async () => {
             onToast("Mods y dependencias instalados exitosamente en el borrador.", "success")
             await onRefresh()
+          }}
+        />
+      )}
+
+      {unresolvedModal && (
+        <UnresolvedModEnvironmentModal
+          theme={theme}
+          unresolvedMods={unresolvedModal.mods}
+          onCancel={() => {
+            unresolvedModal.resolve(null)
+            setUnresolvedModal(null)
+          }}
+          onConfirm={(envs) => {
+            unresolvedModal.resolve(envs)
+            setUnresolvedModal(null)
           }}
         />
       )}

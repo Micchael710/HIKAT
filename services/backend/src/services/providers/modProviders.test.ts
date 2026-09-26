@@ -6257,6 +6257,102 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       expect(unres.reason).toContain("No se pudo determinar el proyecto")
     })
 
+    it("resolveModEnvironmentsByHashes resolves Modrinth via SHA-1 and CurseForge via Murmur2 fingerprint", async () => {
+      mockFetch.mockImplementation(async (url: string, opts?: any) => {
+        const u = String(url)
+        if (u.includes("/version_files")) {
+          const body = JSON.parse(opts?.body || "{}")
+          const res: Record<string, any> = {}
+          if (body.hashes?.includes("sha1-mod-both")) {
+            res["sha1-mod-both"] = { id: "ver-both", project_id: "proj-both" }
+          }
+          if (body.hashes?.includes("sha1-mod-client")) {
+            res["sha1-mod-client"] = { id: "ver-client", project_id: "proj-client" }
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => res,
+          }
+        }
+        if (u.includes("/projects?ids=")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: "proj-both", client_side: "required", server_side: "required" },
+              { id: "proj-client", client_side: "required", server_side: "unsupported" },
+            ],
+          }
+        }
+        if (u.includes("/fingerprints/432")) {
+          const body = JSON.parse(opts?.body || "{}")
+          const matches: any[] = []
+          if (body.fingerprints?.includes(12345678)) {
+            matches.push({
+              exactFingerprint: 12345678,
+              file: {
+                id: 9901,
+                modId: 4401,
+                displayName: "CF Server Mod",
+                fileName: "cf-server.jar",
+                gameVersions: ["1.21.1", "Server"],
+              },
+            })
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: { exactMatches: matches },
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const results = await manager.resolveModEnvironmentsByHashes(env, [
+        { id: "1", filename: "mod-both.jar", sha1: "sha1-mod-both" },
+        { id: "2", filename: "mod-client.jar", sha1: "sha1-mod-client" },
+        { id: "3", filename: "cf-server.jar", sha1: "unknown-sha1", curseforgeFingerprint: 12345678 },
+        { id: "4", filename: "custom-unresolved.jar", sha1: "sha1-none", curseforgeFingerprint: 99999999 },
+      ])
+
+      expect(results).toHaveLength(4)
+      expect(results[0]).toEqual({
+        id: "1",
+        filename: "mod-both.jar",
+        environment: "BOTH",
+        provider: "MODRINTH",
+        projectId: "proj-both",
+        versionId: "ver-both",
+      })
+      expect(results[1]).toEqual({
+        id: "2",
+        filename: "mod-client.jar",
+        environment: "CLIENT",
+        provider: "MODRINTH",
+        projectId: "proj-client",
+        versionId: "ver-client",
+      })
+      expect(results[2]).toEqual({
+        id: "3",
+        filename: "cf-server.jar",
+        environment: "SERVER",
+        provider: "CURSEFORGE",
+        projectId: "4401",
+        versionId: "9901",
+      })
+      expect(results[3]).toEqual({
+        id: "4",
+        filename: "custom-unresolved.jar",
+        environment: null,
+        provider: null,
+        projectId: null,
+        versionId: null,
+      })
+    })
+
     it("installModPlan throws fail-safe error if any MOD arrives at installation with null or UNKNOWN environment", async () => {
       mockFetch.mockImplementation(async (url: string) => {
         const u = String(url)

@@ -831,6 +831,10 @@ export interface CompleteGameFileBatchUploadItemInputGql {
   logicalPath?: string | null
   category?: GameFileCategoryGql | null
   explicitPolicy?: SyncPolicyGql | null
+  environment?: ModEnvironmentGql | null
+  sourceProvider?: ModProviderGql | null
+  sourceProjectId?: string | null
+  sourceVersionId?: string | null
 }
 
 export interface CompleteGameFileBatchUploadInputGql {
@@ -843,6 +847,7 @@ export interface AddGameFileInputGql {
   logicalPath?: string | null
   explicitPolicy?: SyncPolicyGql | null
   tokenHash: string
+  environment?: ModEnvironmentGql | null
 }
 
 export interface UpdateGameFileInputGql {
@@ -851,6 +856,23 @@ export interface UpdateGameFileInputGql {
   logicalPath?: string | null
   explicitPolicy?: SyncPolicyGql | null
   tokenHash?: string | null
+  environment?: ModEnvironmentGql | null
+}
+
+export interface ResolveUploadedModEnvironmentItemInputGql {
+  id: string
+  filename: string
+  sha1?: string | null
+  curseforgeFingerprint?: number | null
+}
+
+export interface ResolvedUploadedModEnvironmentPayloadGql {
+  id: string
+  filename: string
+  environment?: ModEnvironmentGql | null
+  provider?: ModProviderGql | null
+  projectId?: string | null
+  versionId?: string | null
 }
 
 export interface SaveGameFileContentInputGql {

@@ -1917,3 +1917,62 @@ export async function computeCanonicalFingerprint(
   return sha256Hex(canonicalString)
 }
 
+const CF_WHITESPACE_BYTES = new Set([0x09, 0x0a, 0x0d, 0x20])
+
+/**
+ * Computes the official 32-bit normalized Murmur2 fingerprint used by CurseForge API.
+ * Strips whitespace characters (0x09, 0x0A, 0x0D, 0x20) and hashes with seed=1.
+ */
+export function computeCurseForgeFingerprint(bytes: Uint8Array): number {
+  const filtered: number[] = []
+  for (let i = 0; i < bytes.length; i++) {
+    if (!CF_WHITESPACE_BYTES.has(bytes[i]!)) {
+      filtered.push(bytes[i]!)
+    }
+  }
+
+  const length = filtered.length
+  const m = 0x5bd1e995
+  const r = 24
+  let h = ((1 ^ length) >>> 0)
+
+  let i = 0
+  while (i + 4 <= length) {
+    let k =
+      (filtered[i]! |
+      (filtered[i + 1]! << 8) |
+      (filtered[i + 2]! << 16) |
+      (filtered[i + 3]! << 24)) >>> 0
+
+    k = Math.imul(k, m) >>> 0
+    k = (k ^ (k >>> r)) >>> 0
+    k = Math.imul(k, m) >>> 0
+
+    h = Math.imul(h, m) >>> 0
+    h = (h ^ k) >>> 0
+    i += 4
+  }
+
+  const rem = length - i
+  if (rem === 3) {
+    h = (h ^ (filtered[i + 2]! << 16)) >>> 0
+    h = (h ^ (filtered[i + 1]! << 8)) >>> 0
+    h = (h ^ filtered[i]!) >>> 0
+    h = Math.imul(h, m) >>> 0
+  } else if (rem === 2) {
+    h = (h ^ (filtered[i + 1]! << 8)) >>> 0
+    h = (h ^ filtered[i]!) >>> 0
+    h = Math.imul(h, m) >>> 0
+  } else if (rem === 1) {
+    h = (h ^ filtered[i]!) >>> 0
+    h = Math.imul(h, m) >>> 0
+  }
+
+  h = (h ^ (h >>> 13)) >>> 0
+  h = Math.imul(h, m) >>> 0
+  h = (h ^ (h >>> 15)) >>> 0
+
+  return h >>> 0
+}
+
+

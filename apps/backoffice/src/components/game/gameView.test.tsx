@@ -14,6 +14,16 @@ import { ModSearchModal } from "./providers/ModSearchModal"
 describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    vi.spyOn(gameApi, "resolveUploadedModEnvironments").mockImplementation(async (items) => {
+      return items.map((item) => ({
+        id: item.id,
+        filename: item.filename,
+        environment: "BOTH",
+        provider: "MODRINTH",
+        projectId: "proj-1",
+        versionId: "ver-1",
+      }))
+    })
   })
 
   afterEach(() => {
@@ -4214,6 +4224,144 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       // The user remains in "config" and still sees "server.toml"
       expect(screen.getByText("server.toml")).toBeDefined()
+    })
+
+    it("muestra UnresolvedModEnvironmentModal cuando no se localiza el entorno de un mod y aplica la seleccion", async () => {
+      const onToast = vi.fn()
+      const onRefresh = vi.fn()
+
+      vi.spyOn(gameApi, "resolveUploadedModEnvironments").mockResolvedValue([
+        {
+          id: "mods/custom-mod.jar",
+          filename: "custom-mod.jar",
+          environment: null,
+          provider: null,
+        },
+      ])
+
+      const createBatchSpy = vi.spyOn(gameApi, "createGameFileBatchUpload").mockResolvedValue({
+        batchId: "batch-1",
+        prefixPath: "game-files/batches/batch-1/",
+        expiresAt: new Date().toISOString(),
+        bucket: "hikat-r2",
+        endpoint: "https://r2.test",
+        credentials: { accessKeyId: "k", secretAccessKey: "s", sessionToken: "t" },
+        items: [
+          { uploadToken: "tok-1", objectKey: "k-1", expectedCategory: "MOD", originalFilename: "custom-mod.jar", logicalPath: "mods/custom-mod.jar" },
+        ],
+      })
+      vi.spyOn(gameFileUploadService, "uploadGameFilesBatch").mockImplementation(async (items) => {
+        return items.map((i) => ({
+          uploadToken: i.uploadToken,
+          sha256: "test-sha",
+          sizeBytes: 10,
+          name: i.name,
+          logicalPath: i.logicalPath || undefined,
+          category: i.expectedCategory,
+          environment: i.environment,
+        }))
+      })
+      const completeBatchSpy = vi.spyOn(gameApi, "completeGameFileBatchUpload").mockResolvedValue([])
+
+      const { container } = render(
+        <GameFilesExplorer
+          serverId="srv-1"
+          theme="dark"
+          files={[]}
+          isDraft={true}
+          onRefresh={onRefresh}
+          onToast={onToast}
+        />,
+      )
+
+      const inputs = container.querySelectorAll("input[type=\"file\"]")
+      const folderInput = Array.from(inputs).find((i) => i.hasAttribute("webkitdirectory")) as HTMLInputElement
+      const modFile = new File(["dummy jar"], "custom-mod.jar", { type: "application/java-archive" })
+      Object.defineProperty(modFile, "webkitRelativePath", { value: "Pack/mods/custom-mod.jar" })
+
+      await act(async () => {
+        fireEvent.change(folderInput, {
+          target: { files: [modFile] },
+        })
+      })
+
+      // The modal should now be visible asking for environment
+      expect(await screen.findByText("Entorno de mods no identificados")).toBeDefined()
+      expect(screen.getByText("📦 custom-mod.jar")).toBeDefined()
+
+      // Select "Solo Servidor (SERVER)"
+      const serverRadio = screen.getByLabelText(/Solo Servidor \(SERVER\)/i)
+      fireEvent.click(serverRadio)
+
+      // Click "Continuar subida"
+      const continueBtn = screen.getByText("Continuar subida")
+      await act(async () => {
+        fireEvent.click(continueBtn)
+      })
+
+      // Verify batch upload completed with environment SERVER
+      expect(completeBatchSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          items: expect.arrayContaining([
+            expect.objectContaining({
+              logicalPath: "mods/custom-mod.jar",
+              environment: "SERVER",
+            }),
+          ]),
+        }),
+        "srv-1",
+      )
+      expect(onToast).toHaveBeenCalledWith("1 archivo(s) subido(s) exitosamente.", "success")
+    })
+
+    it("cancela la subida si el usuario cancela en UnresolvedModEnvironmentModal", async () => {
+      const onToast = vi.fn()
+      const onRefresh = vi.fn()
+
+      vi.spyOn(gameApi, "resolveUploadedModEnvironments").mockResolvedValue([
+        {
+          id: "mods/unknown.jar",
+          filename: "unknown.jar",
+          environment: null,
+          provider: null,
+        },
+      ])
+
+      const createBatchSpy = vi.spyOn(gameApi, "createGameFileBatchUpload")
+
+      const { container } = render(
+        <GameFilesExplorer
+          serverId="srv-1"
+          theme="dark"
+          files={[]}
+          isDraft={true}
+          onRefresh={onRefresh}
+          onToast={onToast}
+        />,
+      )
+
+      const inputs = container.querySelectorAll("input[type=\"file\"]")
+      const folderInput = Array.from(inputs).find((i) => i.hasAttribute("webkitdirectory")) as HTMLInputElement
+      const modFile = new File(["dummy jar"], "unknown.jar", { type: "application/java-archive" })
+      Object.defineProperty(modFile, "webkitRelativePath", { value: "mods/unknown.jar" })
+
+      await act(async () => {
+        fireEvent.change(folderInput, {
+          target: { files: [modFile] },
+        })
+      })
+
+      expect(await screen.findByText("Entorno de mods no identificados")).toBeDefined()
+
+      // Click "Cancelar"
+      const cancelBtn = screen.getByRole("button", { name: "Cancelar" })
+      await act(async () => {
+        fireEvent.click(cancelBtn)
+      })
+
+      // Modal closes and batch upload was NEVER initiated
+      expect(screen.queryByText("Entorno de mods no identificados")).toBeNull()
+      expect(createBatchSpy).not.toHaveBeenCalled()
     })
   })
 })

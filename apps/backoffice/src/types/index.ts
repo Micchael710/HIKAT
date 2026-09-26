@@ -599,10 +599,30 @@ export interface CompleteGameFileBatchUploadItemInput {
   logicalPath?: string | null
   category?: GameFileCategory | null
   explicitPolicy?: SyncPolicy | null
+  environment?: ModEnvironment | null
+  sourceProvider?: string | null
+  sourceProjectId?: string | null
+  sourceVersionId?: string | null
 }
 
 export interface CompleteGameFileBatchUploadInput {
   items: CompleteGameFileBatchUploadItemInput[]
+}
+
+export interface ResolveUploadedModEnvironmentItemInput {
+  id: string
+  filename: string
+  sha1?: string | null
+  curseforgeFingerprint?: number | null
+}
+
+export interface ResolvedUploadedModEnvironmentPayload {
+  id: string
+  filename: string
+  environment?: ModEnvironment | null
+  provider?: string | null
+  projectId?: string | null
+  versionId?: string | null
 }
 
 export interface UpdateGameDraftMetadataInput {

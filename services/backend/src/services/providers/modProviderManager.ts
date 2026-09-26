@@ -3243,6 +3243,99 @@ export class ModProviderManager {
       transferItems: Array.from(transferItemsMap.values()),
     }
   }
+
+  /**
+   * Resolves mod environments (CLIENT, SERVER, BOTH) for uploaded files by looking up
+   * SHA-1 hashes in Modrinth and Murmur2 fingerprints in CurseForge.
+   */
+  async resolveModEnvironmentsByHashes(
+    env: Env,
+    items: Array<{
+      id: string
+      filename: string
+      sha1?: string | null
+      curseforgeFingerprint?: number | null
+    }>,
+  ): Promise<Array<{
+    id: string
+    filename: string
+    environment: ModEnvironmentGql | null
+    provider?: ModProviderGql | null
+    projectId?: string | null
+    versionId?: string | null
+  }>> {
+    const results: Array<{
+      id: string
+      filename: string
+      environment: ModEnvironmentGql | null
+      provider?: ModProviderGql | null
+      projectId?: string | null
+      versionId?: string | null
+    }> = items.map((it) => ({
+      id: it.id,
+      filename: it.filename,
+      environment: null,
+      provider: null,
+      projectId: null,
+      versionId: null,
+    }))
+
+    // 1. Modrinth resolution for items with sha1
+    const sha1Items = items
+      .map((it, idx) => ({ it, idx }))
+      .filter(({ it }) => Boolean(it.sha1?.trim()))
+
+    if (sha1Items.length > 0) {
+      const sha1s = sha1Items.map(({ it }) => it.sha1!.trim().toLowerCase())
+      try {
+        const mrMap = await this.modrinth.resolveHashes(env, sha1s)
+        for (const { it, idx } of sha1Items) {
+          const match = mrMap.get(it.sha1!.trim().toLowerCase())
+          if (match) {
+            results[idx] = {
+              id: it.id,
+              filename: it.filename,
+              environment: match.environment === "UNKNOWN" ? null : match.environment,
+              provider: "MODRINTH",
+              projectId: match.projectId,
+              versionId: match.versionId,
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[ModProviderManager] Modrinth hash resolution error:", err)
+      }
+    }
+
+    // 2. CurseForge resolution for remaining unresolved items with fingerprint
+    const unresolvedCf = items
+      .map((it, idx) => ({ it, idx }))
+      .filter(({ idx, it }) => !results[idx]?.environment && it.curseforgeFingerprint !== undefined && it.curseforgeFingerprint !== null)
+
+    if (unresolvedCf.length > 0 && this.curseforge.isConfigured(env)) {
+      const fps = unresolvedCf.map(({ it }) => Number(it.curseforgeFingerprint))
+      try {
+        const cfMap = await this.curseforge.resolveFingerprints(env, fps)
+        for (const { it, idx } of unresolvedCf) {
+          const match = cfMap.get(Number(it.curseforgeFingerprint))
+          if (match) {
+            results[idx] = {
+              id: it.id,
+              filename: it.filename,
+              environment: match.environment,
+              provider: "CURSEFORGE",
+              projectId: match.projectId,
+              versionId: match.versionId,
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[ModProviderManager] CurseForge fingerprint resolution error:", err)
+      }
+    }
+
+    return results
+  }
 }
 
 export const modProviderManager = new ModProviderManager()

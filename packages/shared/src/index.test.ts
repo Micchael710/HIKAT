@@ -634,4 +634,15 @@ describe("Shard 08A: Game Files Explorer Domain & Path Utilities", () => {
     const fingerprint = await computeCanonicalFingerprint(items)
     expect(fingerprint).toBe("4fac370ba18fb419bdef32b87c01b28f3051a55f0a60a9d8a337fdd36f5d5c50")
   })
+
+  it("computes CurseForge Murmur2 fingerprint correctly ignoring whitespace", async () => {
+    const { computeCurseForgeFingerprint } = await import("./index")
+    const raw = new TextEncoder().encode("Hello World")
+    const withWhitespace = new TextEncoder().encode("Hello \r\n\tWorld ")
+    const fp1 = computeCurseForgeFingerprint(raw)
+    const fp2 = computeCurseForgeFingerprint(withWhitespace)
+
+    expect(fp1).toBe(1756117720)
+    expect(fp2).toBe(1756117720)
+  })
 })

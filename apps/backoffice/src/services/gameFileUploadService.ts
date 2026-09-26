@@ -1,8 +1,24 @@
 import { S3Client } from "@aws-sdk/client-s3"
 import { Upload } from "@aws-sdk/lib-storage"
 import { createSHA256 } from "hash-wasm"
-import type { GameFileCategory } from "@hikat/shared"
+import { computeCurseForgeFingerprint, type GameFileCategory } from "@hikat/shared"
 import type { GameFileUploadPayloadGql } from "@hikat/graphql"
+
+/**
+ * Computes SHA-1 and CurseForge Murmur2 fingerprint for a JAR file.
+ */
+export async function computeJarHashes(file: File): Promise<{ sha1: string; cfFingerprint: number }> {
+  const buffer = await file.arrayBuffer()
+  const bytes = new Uint8Array(buffer)
+
+  const digest = await crypto.subtle.digest("SHA-1", buffer)
+  const sha1 = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+
+  const cfFingerprint = computeCurseForgeFingerprint(bytes)
+  return { sha1, cfFingerprint }
+}
 
 /**
  * Computes the SHA-256 hex digest of a File incrementally using hash-wasm
@@ -106,12 +122,30 @@ export interface BatchUploadFileItem {
   name: string
   logicalPath?: string | null
   explicitPolicy?: import("@hikat/graphql").SyncPolicyGql | null
+  environment?: import("@hikat/graphql").ModEnvironmentGql | null
+  sourceProvider?: import("@hikat/graphql").ModProviderGql | null
+  sourceProjectId?: string | null
+  sourceVersionId?: string | null
 }
 
 export interface BatchUploadProgress {
   completed: number
   total: number
   currentFilename: string
+}
+
+export interface UploadedBatchResultItem {
+  uploadToken: string
+  sha256: string
+  sizeBytes: number
+  name: string
+  logicalPath?: string | null
+  category?: GameFileCategory | null
+  explicitPolicy?: import("@hikat/graphql").SyncPolicyGql | null
+  environment?: import("@hikat/graphql").ModEnvironmentGql | null
+  sourceProvider?: import("@hikat/graphql").ModProviderGql | null
+  sourceProjectId?: string | null
+  sourceVersionId?: string | null
 }
 
 /**
@@ -131,24 +165,8 @@ export async function uploadGameFilesBatch(
   },
   onProgress?: (progress: BatchUploadProgress) => void,
   concurrencyLimit = 10,
-): Promise<Array<{
-  uploadToken: string
-  sha256: string
-  sizeBytes: number
-  name: string
-  logicalPath?: string | null
-  category?: GameFileCategory | null
-  explicitPolicy?: import("@hikat/graphql").SyncPolicyGql | null
-}>> {
-  const results: Array<{
-    uploadToken: string
-    sha256: string
-    sizeBytes: number
-    name: string
-    logicalPath?: string | null
-    category?: GameFileCategory | null
-    explicitPolicy?: import("@hikat/graphql").SyncPolicyGql | null
-  }> = new Array(items.length)
+): Promise<UploadedBatchResultItem[]> {
+  const results: UploadedBatchResultItem[] = new Array(items.length)
 
   let completedCount = 0
   let nextIndex = 0
@@ -193,6 +211,10 @@ export async function uploadGameFilesBatch(
         logicalPath: item.logicalPath,
         category: item.expectedCategory,
         explicitPolicy: item.explicitPolicy,
+        environment: item.environment,
+        sourceProvider: item.sourceProvider,
+        sourceProjectId: item.sourceProjectId,
+        sourceVersionId: item.sourceVersionId,
       }
     }
   }

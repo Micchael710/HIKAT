@@ -303,6 +303,10 @@ export const gameTypeDefs = /* GraphQL */ `
     logicalPath: String
     category: GameFileCategory
     explicitPolicy: SyncPolicy
+    environment: ModEnvironment
+    sourceProvider: ModProvider
+    sourceProjectId: String
+    sourceVersionId: String
   }
 
   """
@@ -484,6 +488,28 @@ export const gameTypeDefs = /* GraphQL */ `
     isValid: Boolean!
   }
 
+  """
+  Input item for resolving uploaded mod environment by hash
+  """
+  input ResolveUploadedModEnvironmentItemInput {
+    id: String!
+    filename: String!
+    sha1: String
+    curseforgeFingerprint: Float
+  }
+
+  """
+  Payload returned for each resolved uploaded mod environment
+  """
+  type ResolvedUploadedModEnvironmentPayload {
+    id: String!
+    filename: String!
+    environment: ModEnvironment
+    provider: ModProvider
+    projectId: String
+    versionId: String
+  }
+
   input CreateGameFileUploadInput {
     category: GameFileCategory
     originalFilename: String!
@@ -504,6 +530,7 @@ export const gameTypeDefs = /* GraphQL */ `
     logicalPath: String
     explicitPolicy: SyncPolicy
     tokenHash: String!
+    environment: ModEnvironment
   }
 
   input UpdateGameFileInput {
@@ -512,6 +539,7 @@ export const gameTypeDefs = /* GraphQL */ `
     logicalPath: String
     explicitPolicy: SyncPolicy
     tokenHash: String
+    environment: ModEnvironment
   }
 
   input SaveGameFileContentInput {
@@ -655,6 +683,11 @@ export const gameTypeDefs = /* GraphQL */ `
       serverId: ID
       input: ResolveModPlanInput!
     ): ModInstallationPlan!
+
+    """
+    Resolve environment (CLIENT, SERVER, BOTH) for uploaded mod files using Modrinth and CurseForge hash lookups - requires ADMIN role
+    """
+    resolveUploadedModEnvironments(items: [ResolveUploadedModEnvironmentItemInput!]!): [ResolvedUploadedModEnvironmentPayload!]!
   }
 
   extend type Mutation {

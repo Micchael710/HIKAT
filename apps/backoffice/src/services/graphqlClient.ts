@@ -1912,6 +1912,7 @@ export const gameApi = {
     logicalPath?: string
     explicitPolicy?: import("../types").SyncPolicy
     tokenHash: string
+    environment?: import("../types").ModEnvironment | null
   }, serverId: string): Promise<import("../types").AdminGameFile> {
     const mutation = /* GraphQL */ `
       mutation AddGameFile($input: AddGameFileInput!, $serverId: ID) {
@@ -1927,6 +1928,7 @@ export const gameApi = {
           effectivePolicy
           isInherited
           isDirectory
+          sourceEnvironment
           createdAt
         }
       }
@@ -1936,6 +1938,27 @@ export const gameApi = {
       serverId,
     })
     return data.addGameFile
+  },
+
+  async resolveUploadedModEnvironments(
+    items: import("../types").ResolveUploadedModEnvironmentItemInput[],
+  ): Promise<import("../types").ResolvedUploadedModEnvironmentPayload[]> {
+    const query = /* GraphQL */ `
+      query ResolveUploadedModEnvironments($items: [ResolveUploadedModEnvironmentItemInput!]!) {
+        resolveUploadedModEnvironments(items: $items) {
+          id
+          filename
+          environment
+          provider
+          projectId
+          versionId
+        }
+      }
+    `
+    const data = await executeGraphQL<{
+      resolveUploadedModEnvironments: import("../types").ResolvedUploadedModEnvironmentPayload[]
+    }>(query, { items })
+    return data.resolveUploadedModEnvironments
   },
 
   async updateGameFile(

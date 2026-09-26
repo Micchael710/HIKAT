@@ -660,4 +660,94 @@ export class ModrinthAdapter implements ModProviderAdapter {
       dependencies,
     }
   }
+
+  async resolveHashes(
+    env: Env,
+    hashes: string[],
+  ): Promise<Map<string, { projectId: string; versionId: string; environment: ModEnvironmentGql }>> {
+    const resultMap = new Map<string, { projectId: string; versionId: string; environment: ModEnvironmentGql }>()
+    if (!hashes || hashes.length === 0) return resultMap
+
+    const baseUrl = this.getBaseUrl(env)
+    const BATCH_SIZE = 80
+    const versionMap = new Map<string, { id: string; projectId: string }>()
+
+    for (let i = 0; i < hashes.length; i += BATCH_SIZE) {
+      const chunk = hashes.slice(i, i + BATCH_SIZE)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+      try {
+        const res = await fetch(`${baseUrl}/version_files`, {
+          method: "POST",
+          headers: {
+            "User-Agent": USER_AGENT,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ hashes: chunk, algorithm: "sha1" }),
+          signal: controller.signal,
+        })
+        if (res.ok) {
+          const data = (await res.json()) as Record<string, { id: string; project_id: string }>
+          if (data && typeof data === "object") {
+            for (const [hashKey, ver] of Object.entries(data)) {
+              if (ver && ver.project_id && ver.id) {
+                versionMap.set(hashKey.toLowerCase(), { id: ver.id, projectId: ver.project_id })
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[ModrinthAdapter] Error in /version_files batch:", err)
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    }
+
+    if (versionMap.size === 0) return resultMap
+
+    const uniqueProjectIds = Array.from(new Set(Array.from(versionMap.values()).map((v) => v.projectId)))
+    const projectEnvMap = new Map<string, ModEnvironmentGql>()
+
+    for (let i = 0; i < uniqueProjectIds.length; i += BATCH_SIZE) {
+      const chunk = uniqueProjectIds.slice(i, i + BATCH_SIZE)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+      try {
+        const encoded = encodeURIComponent(JSON.stringify(chunk))
+        const res = await fetch(`${baseUrl}/projects?ids=${encoded}`, {
+          headers: {
+            "User-Agent": USER_AGENT,
+            Accept: "application/json",
+          },
+          signal: controller.signal,
+        })
+        if (res.ok) {
+          const list = (await res.json()) as Array<{ id: string; client_side?: string; server_side?: string }>
+          if (Array.isArray(list)) {
+            for (const proj of list) {
+              projectEnvMap.set(proj.id, mapModrinthEnvironment(proj.client_side, proj.server_side))
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[ModrinthAdapter] Error in /projects batch:", err)
+      } finally {
+        clearTimeout(timeoutId)
+      }
+    }
+
+    for (const [hash, ver] of versionMap.entries()) {
+      const envVal = projectEnvMap.get(ver.projectId) || "BOTH"
+      resultMap.set(hash, {
+        projectId: ver.projectId,
+        versionId: ver.id,
+        environment: envVal,
+      })
+    }
+
+    return resultMap
+  }
 }

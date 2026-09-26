@@ -1094,6 +1094,16 @@ export const resolvers = {
       )
     },
 
+    resolveUploadedModEnvironments: async (
+      _parent: unknown,
+      args: { items: import("@hikat/graphql").ResolveUploadedModEnvironmentItemInputGql[] },
+      context: BackendGraphQLContext,
+    ): Promise<import("@hikat/graphql").ResolvedUploadedModEnvironmentPayloadGql[]> => {
+      requireAdmin(context)
+      return modProviderManager.resolveModEnvironmentsByHashes(context.env, args.items || [])
+    },
+
+
 
     // --- Settings Queries (Shard 06.5) ---
 
