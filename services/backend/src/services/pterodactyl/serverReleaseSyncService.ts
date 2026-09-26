@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull, inArray } from "drizzle-orm"
+import { eq, and, desc, isNull, inArray, ne, sql } from "drizzle-orm"
 import { Database, schema } from "@hikat/database"
 import { createGraphQLError } from "@hikat/graphql"
 import { validateGameFileBuffer, computeCanonicalFingerprint } from "@hikat/shared"
@@ -146,53 +146,210 @@ export async function getServerReleaseSyncPlan(
     .where(and(...currentConditions))
     .all()
 
-  const items: ServerReleaseSyncPlanItemGql[] = []
-  const matchedCurrentIds = new Set<string>()
-
-  // 5. Compare desired against current and physical filesystem state
-  for (const desired of desiredFiles) {
-    const matchedCurrent = currentRecords.find(
-      (c) =>
-        c.gameReleaseFileId === desired.id ||
-        (Boolean(c.projectId) &&
-          Boolean(desired.sourceProjectId) &&
-          c.projectId === desired.sourceProjectId &&
-          (c.provider || null) === (desired.sourceProvider || null)) ||
-        c.targetPath === `mods/${desired.name}`,
+  // 4b. Find previously applied release for this server (to compute delta)
+  const prevSyncResult = await db
+    .select({
+      releaseId: schema.serverReleaseSyncs.releaseId,
+    })
+    .from(schema.serverReleaseSyncs)
+    .innerJoin(schema.gameReleases, eq(schema.serverReleaseSyncs.releaseId, schema.gameReleases.id))
+    .where(
+      and(
+        eq(schema.serverReleaseSyncs.status, "APPLIED"),
+        ne(schema.serverReleaseSyncs.releaseId, published.id),
+        serverId ? eq(schema.gameReleases.serverId, serverId) : sql`1=1`,
+      ),
     )
+    .orderBy(desc(schema.serverReleaseSyncs.appliedAt), desc(schema.serverReleaseSyncs.createdAt))
+    .limit(1)
+    .get()
 
-    const physicalExists = physicalMods.has(desired.name)
+  let prevReleaseId = prevSyncResult?.releaseId || null
 
-    if (!matchedCurrent) {
-      // Item needs to be INSTALLED
-      items.push({
-        action: "INSTALL",
-        filename: desired.name,
-        targetPath: `mods/${desired.name}`,
-        sizeBytes: desired.sizeBytes,
-        sha256: desired.sha256,
-        sourceProvider: (desired.sourceProvider as any) || null,
-        sourceProjectId: desired.sourceProjectId || null,
-        sourceVersionId: desired.sourceVersionId || null,
-        sourceFileId: desired.sourceFileId || null,
-        gameReleaseFileId: desired.id,
-        managedContentId: null,
-        currentVersionNumber: null,
-        desiredVersionNumber: desired.name,
-      })
-    } else {
-      matchedCurrentIds.add(matchedCurrent.id)
-      const currentFileName = matchedCurrent.targetPath.split("/").pop() || matchedCurrent.targetPath
-      const desiredEnvironment = desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH"
-      const currentEnv = matchedCurrent.environment || "BOTH"
-      const isIdentical =
-        matchedCurrent.sha256 === desired.sha256 &&
-        matchedCurrent.targetPath === `mods/${desired.name}` &&
-        currentEnv === desiredEnvironment
+  if (!prevReleaseId && serverId) {
+    const srv = await db
+      .select({ launcherActiveReleaseId: schema.servers.launcherActiveReleaseId })
+      .from(schema.servers)
+      .where(eq(schema.servers.id, serverId))
+      .get()
+    if (srv?.launcherActiveReleaseId && srv.launcherActiveReleaseId !== published.id) {
+      prevReleaseId = srv.launcherActiveReleaseId
+    }
+  }
 
-      if (isIdentical) {
-        if (!physicalFilesAvailable || physicalExists) {
-          // Tracked in D1 AND present on Wings filesystem (or logical plan when filesystem is unavailable)
+  const previousFiles = prevReleaseId
+    ? await db
+        .select()
+        .from(schema.gameReleaseFiles)
+        .where(
+          and(
+            eq(schema.gameReleaseFiles.releaseId, prevReleaseId),
+            eq(schema.gameReleaseFiles.category, "MOD"),
+            inArray(schema.gameReleaseFiles.sourceEnvironment, ["BOTH", "SERVER"]),
+          ),
+        )
+        .all()
+    : []
+
+  const items: ServerReleaseSyncPlanItemGql[] = []
+
+  if (previousFiles.length > 0) {
+    // Delta Sync Mode: Compare previous release vs published release
+    const prevMap = new Map<string, (typeof previousFiles)[0]>()
+    for (const pf of previousFiles) {
+      prevMap.set(pf.name, pf)
+    }
+    const desiredNames = new Set<string>()
+
+    for (const desired of desiredFiles) {
+      desiredNames.add(desired.name)
+      const prev =
+        prevMap.get(desired.name) ||
+        previousFiles.find((p) => Boolean(p.sourceProjectId) && p.sourceProjectId === desired.sourceProjectId)
+
+      const matchedCurrent = currentRecords.find(
+        (c) =>
+          c.gameReleaseFileId === desired.id ||
+          (Boolean(c.projectId) &&
+            Boolean(desired.sourceProjectId) &&
+            c.projectId === desired.sourceProjectId &&
+            (c.provider || null) === (desired.sourceProvider || null)) ||
+          c.targetPath === `mods/${desired.name}`,
+      )
+
+      if (!prev) {
+        // Newly ADDED in this release!
+        items.push({
+          action: "INSTALL",
+          filename: desired.name,
+          targetPath: `mods/${desired.name}`,
+          sizeBytes: desired.sizeBytes,
+          sha256: desired.sha256,
+          sourceProvider: (desired.sourceProvider as any) || null,
+          sourceProjectId: desired.sourceProjectId || null,
+          sourceVersionId: desired.sourceVersionId || null,
+          sourceFileId: desired.sourceFileId || null,
+          gameReleaseFileId: desired.id,
+          managedContentId: matchedCurrent?.id || null,
+          currentVersionNumber: null,
+          desiredVersionNumber: desired.name,
+        })
+      } else {
+        const isIdentical =
+          prev.sha256 === desired.sha256 &&
+          prev.name === desired.name &&
+          (prev.sourceEnvironment || "BOTH") === (desired.sourceEnvironment || "BOTH")
+
+        if (isIdentical) {
+          // UNCHANGED between releases: DO NOT force re-install even if missing on Wings!
+          items.push({
+            action: "KEEP",
+            filename: desired.name,
+            targetPath: `mods/${desired.name}`,
+            sizeBytes: desired.sizeBytes,
+            sha256: desired.sha256,
+            sourceProvider: (desired.sourceProvider as any) || (prev.sourceProvider as any) || null,
+            sourceProjectId: desired.sourceProjectId || prev.sourceProjectId || null,
+            sourceVersionId: desired.sourceVersionId || prev.sourceVersionId || null,
+            sourceFileId: desired.sourceFileId || prev.sourceFileId || null,
+            gameReleaseFileId: desired.id,
+            managedContentId: matchedCurrent?.id || null,
+            currentVersionNumber: prev.name,
+            desiredVersionNumber: desired.name,
+          })
+        } else {
+          // UPDATED between releases!
+          items.push({
+            action: "UPDATE",
+            filename: desired.name,
+            targetPath: `mods/${desired.name}`,
+            sizeBytes: desired.sizeBytes,
+            sha256: desired.sha256,
+            sourceProvider: (desired.sourceProvider as any) || (prev.sourceProvider as any) || null,
+            sourceProjectId: desired.sourceProjectId || prev.sourceProjectId || null,
+            sourceVersionId: desired.sourceVersionId || prev.sourceVersionId || null,
+            sourceFileId: desired.sourceFileId || prev.sourceFileId || null,
+            gameReleaseFileId: desired.id,
+            managedContentId: matchedCurrent?.id || null,
+            currentVersionNumber: prev.name,
+            desiredVersionNumber: desired.name,
+          })
+        }
+      }
+    }
+
+    // Identify REMOVED files (Option A: files in previous release removed from new release)
+    for (const prev of previousFiles) {
+      const stillInDesired =
+        desiredNames.has(prev.name) ||
+        desiredFiles.some((d) => Boolean(d.sourceProjectId) && d.sourceProjectId === prev.sourceProjectId)
+      if (!stillInDesired) {
+        const matchedCurrent = currentRecords.find(
+          (c) =>
+            c.gameReleaseFileId === prev.id ||
+            (Boolean(c.projectId) && Boolean(prev.sourceProjectId) && c.projectId === prev.sourceProjectId) ||
+            c.targetPath === `mods/${prev.name}`,
+        )
+        items.push({
+          action: "REMOVE",
+          filename: prev.name,
+          targetPath: `mods/${prev.name}`,
+          sizeBytes: prev.sizeBytes,
+          sha256: prev.sha256,
+          sourceProvider: (prev.sourceProvider as any) || null,
+          sourceProjectId: prev.sourceProjectId || null,
+          sourceVersionId: prev.sourceVersionId || null,
+          sourceFileId: prev.sourceFileId || null,
+          gameReleaseFileId: prev.id,
+          managedContentId: matchedCurrent?.id || null,
+          currentVersionNumber: prev.name,
+          desiredVersionNumber: null,
+        })
+      }
+    }
+  } else {
+    // Initial Sync Mode (no previous applied release):
+    const matchedCurrentIds = new Set<string>()
+
+    for (const desired of desiredFiles) {
+      const matchedCurrent = currentRecords.find(
+        (c) =>
+          c.gameReleaseFileId === desired.id ||
+          (Boolean(c.projectId) &&
+            Boolean(desired.sourceProjectId) &&
+            c.projectId === desired.sourceProjectId &&
+            (c.provider || null) === (desired.sourceProvider || null)) ||
+          c.targetPath === `mods/${desired.name}`,
+      )
+      const physicalExists = physicalMods.has(desired.name)
+
+      if (!matchedCurrent) {
+        items.push({
+          action: "INSTALL",
+          filename: desired.name,
+          targetPath: `mods/${desired.name}`,
+          sizeBytes: desired.sizeBytes,
+          sha256: desired.sha256,
+          sourceProvider: (desired.sourceProvider as any) || null,
+          sourceProjectId: desired.sourceProjectId || null,
+          sourceVersionId: desired.sourceVersionId || null,
+          sourceFileId: desired.sourceFileId || null,
+          gameReleaseFileId: desired.id,
+          managedContentId: null,
+          currentVersionNumber: null,
+          desiredVersionNumber: desired.name,
+        })
+      } else {
+        matchedCurrentIds.add(matchedCurrent.id)
+        const currentFileName = matchedCurrent.targetPath.split("/").pop() || matchedCurrent.targetPath
+        const currentEnv = matchedCurrent.environment === "SERVER" ? "SERVER" : "BOTH"
+        const desiredEnv = desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH"
+        const isIdentical =
+          matchedCurrent.sha256 === desired.sha256 &&
+          matchedCurrent.targetPath === `mods/${desired.name}` &&
+          currentEnv === desiredEnv
+
+        if (isIdentical) {
           items.push({
             action: "KEEP",
             filename: desired.name,
@@ -209,9 +366,8 @@ export async function getServerReleaseSyncPlan(
             desiredVersionNumber: desired.name,
           })
         } else {
-          // Physical drift: Filesystem is available, tracked in D1, but physically missing from Wings filesystem!
           items.push({
-            action: "INSTALL",
+            action: "UPDATE",
             filename: desired.name,
             targetPath: `mods/${desired.name}`,
             sizeBytes: desired.sizeBytes,
@@ -226,45 +382,28 @@ export async function getServerReleaseSyncPlan(
             desiredVersionNumber: desired.name,
           })
         }
-      } else {
-        items.push({
-          action: "UPDATE",
-          filename: desired.name,
-          targetPath: `mods/${desired.name}`,
-          sizeBytes: desired.sizeBytes,
-          sha256: desired.sha256,
-          sourceProvider: (desired.sourceProvider as any) || (matchedCurrent.provider as any) || null,
-          sourceProjectId: desired.sourceProjectId || matchedCurrent.projectId || null,
-          sourceVersionId: desired.sourceVersionId || matchedCurrent.versionId || null,
-          sourceFileId: desired.sourceFileId || matchedCurrent.fileId || null,
-          gameReleaseFileId: desired.id,
-          managedContentId: matchedCurrent.id,
-          currentVersionNumber: currentFileName,
-          desiredVersionNumber: desired.name,
-        })
       }
     }
-  }
 
-  // 6. Identify unreferenced current records to REMOVE
-  for (const current of currentRecords) {
-    if (!matchedCurrentIds.has(current.id)) {
-      const currentFileName = current.targetPath.split("/").pop() || current.targetPath
-      items.push({
-        action: "REMOVE",
-        filename: currentFileName,
-        targetPath: current.targetPath,
-        sizeBytes: current.sizeBytes,
-        sha256: current.sha256 || current.providerHash || "",
-        sourceProvider: (current.provider as any) || null,
-        sourceProjectId: current.projectId || null,
-        sourceVersionId: current.versionId || null,
-        sourceFileId: current.fileId || null,
-        gameReleaseFileId: current.gameReleaseFileId || null,
-        managedContentId: current.id,
-        currentVersionNumber: currentFileName,
-        desiredVersionNumber: null,
-      })
+    for (const current of currentRecords) {
+      if (!matchedCurrentIds.has(current.id)) {
+        const currentFileName = current.targetPath.split("/").pop() || current.targetPath
+        items.push({
+          action: "REMOVE",
+          filename: currentFileName,
+          targetPath: current.targetPath,
+          sizeBytes: current.sizeBytes,
+          sha256: current.sha256 || current.providerHash || "",
+          sourceProvider: (current.provider as any) || null,
+          sourceProjectId: current.projectId || null,
+          sourceVersionId: current.versionId || null,
+          sourceFileId: current.fileId || null,
+          gameReleaseFileId: current.gameReleaseFileId || null,
+          managedContentId: current.id,
+          currentVersionNumber: currentFileName,
+          desiredVersionNumber: null,
+        })
+      }
     }
   }
 
@@ -656,18 +795,37 @@ export async function applyServerReleaseSync(
       throw createGraphQLError("El almacenamiento R2 no está configurado.", "INTERNAL_ERROR")
     }
 
+    // Pre-calculate sync plan as the authoritative blueprint
+    const plan = await getServerReleaseSyncPlan(db, env, serverId, clientOverride)
+    const planItemsMap = new Map<string, ServerReleaseSyncPlanItemGql>()
+    for (const item of plan.items) {
+      planItemsMap.set(item.filename, item)
+    }
+
     const stagedBinaries = new Map<string, Uint8Array>()
     for (const desired of desiredFiles) {
-      const isIdentical = currentRecords.some(
+      const planItem = planItemsMap.get(desired.name)
+      if (planItem?.action === "KEEP") {
+        continue // Option A: KEEP items are not re-downloaded
+      }
+
+      const matchedCurrent = currentRecords.find(
         (c) =>
-          (c.gameReleaseFileId === desired.id ||
-            (c.provider === desired.sourceProvider && c.projectId === desired.sourceProjectId)) &&
-          c.sha256 === desired.sha256 &&
+          c.gameReleaseFileId === desired.id ||
+          (Boolean(c.projectId) &&
+            Boolean(desired.sourceProjectId) &&
+            c.projectId === desired.sourceProjectId &&
+            (c.provider || null) === (desired.sourceProvider || null)) ||
           c.targetPath === `mods/${desired.name}`,
       )
+      const isIdenticalBinary =
+        matchedCurrent &&
+        matchedCurrent.sha256 === desired.sha256 &&
+        matchedCurrent.targetPath === `mods/${desired.name}` &&
+        physicalMods.has(desired.name)
 
-      if (isIdentical && physicalMods.has(desired.name)) {
-        continue // KEEP, already matched and physically present on Wings
+      if (planItem?.action === "UPDATE" && isIdenticalBinary) {
+        continue // Environment change only, no binary rewrite needed
       }
 
       // Download and validate from R2
@@ -732,6 +890,7 @@ export async function applyServerReleaseSync(
 
     for (const desired of desiredFiles) {
       heartbeat.assertLeaseOwned()
+      const planItem = planItemsMap.get(desired.name)
       const matchedCurrent = currentRecords.find(
         (c) =>
           c.gameReleaseFileId === desired.id ||
@@ -742,33 +901,34 @@ export async function applyServerReleaseSync(
           c.targetPath === `mods/${desired.name}`,
       )
 
-      if (matchedCurrent) {
-        matchedCurrentIds.add(matchedCurrent.id)
-        const isIdentical =
+      if (planItem?.action === "KEEP") {
+        keptCount++
+        continue
+      }
+
+      const desiredEnvironment = desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH"
+
+      if (planItem?.action === "UPDATE") {
+        const isIdenticalBinary =
+          matchedCurrent &&
           matchedCurrent.sha256 === desired.sha256 &&
-          matchedCurrent.targetPath === `mods/${desired.name}`
+          matchedCurrent.targetPath === `mods/${desired.name}` &&
+          physicalMods.has(desired.name)
 
-        if (isIdentical && physicalMods.has(desired.name)) {
-          const desiredEnvironment = desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH"
-          const currentEnv = matchedCurrent.environment || "BOTH"
-          if (currentEnv !== desiredEnvironment) {
-            await db
-              .update(schema.serverManagedContent)
-              .set({
-                environment: desiredEnvironment,
-                gameReleaseFileId: desired.id,
-                provider: desired.sourceProvider || matchedCurrent.provider || null,
-                projectId: desired.sourceProjectId || matchedCurrent.projectId || null,
-                versionId: desired.sourceVersionId || matchedCurrent.versionId || null,
-                fileId: desired.sourceFileId || matchedCurrent.fileId || null,
-                updatedAt: new Date().toISOString(),
-              })
-              .where(eq(schema.serverManagedContent.id, matchedCurrent.id))
-            updatedCount++
-            continue
-          }
-
-          keptCount++
+        if (isIdenticalBinary && matchedCurrent) {
+          await db
+            .update(schema.serverManagedContent)
+            .set({
+              environment: desiredEnvironment,
+              gameReleaseFileId: desired.id,
+              provider: desired.sourceProvider || matchedCurrent.provider || null,
+              projectId: desired.sourceProjectId || matchedCurrent.projectId || null,
+              versionId: desired.sourceVersionId || matchedCurrent.versionId || null,
+              fileId: desired.sourceFileId || matchedCurrent.fileId || null,
+              updatedAt: new Date().toISOString(),
+            })
+            .where(eq(schema.serverManagedContent.id, matchedCurrent.id))
+          updatedCount++
           continue
         }
       }
@@ -812,7 +972,7 @@ export async function applyServerReleaseSync(
               versionId: desired.sourceVersionId,
               fileId: desired.sourceFileId || null,
               contentType: "MOD",
-              environment: desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH",
+              environment: desiredEnvironment,
               targetPath: `mods/${desired.name}`,
               sha256: desired.sha256,
               sizeBytes: desired.sizeBytes,
@@ -844,7 +1004,7 @@ export async function applyServerReleaseSync(
                 versionId: desired.sourceVersionId,
                 fileId: desired.sourceFileId || null,
                 contentType: "MOD",
-                environment: desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH",
+                environment: desiredEnvironment,
                 targetPath: `mods/${desired.name}`,
                 sha256: desired.sha256,
                 sizeBytes: desired.sizeBytes,
@@ -864,7 +1024,7 @@ export async function applyServerReleaseSync(
               versionId: desired.sourceVersionId,
               fileId: desired.sourceFileId || null,
               contentType: "MOD",
-              environment: desired.sourceEnvironment === "SERVER" ? "SERVER" : "BOTH",
+              environment: desiredEnvironment,
               targetPath: `mods/${desired.name}`,
               sha256: desired.sha256,
               sizeBytes: desired.sizeBytes,
@@ -885,22 +1045,21 @@ export async function applyServerReleaseSync(
       }
     }
 
-    // Step D: Apply REMOVE for unreferenced GAME_RELEASE items
+    // Step D: Apply REMOVE items from the plan
     heartbeat.assertLeaseOwned()
-    for (const current of currentRecords) {
-      if (!matchedCurrentIds.has(current.id)) {
-        heartbeat.assertLeaseOwned()
-        const fileName = current.targetPath.split("/").pop() || current.targetPath
-        // Safe physical delete
-        await safeDeleteServerFilePhysical(client, "/mods", fileName)
-
-        // Delete from D1
+    const removePlanItems = plan.items.filter((i) => i.action === "REMOVE")
+    for (const rem of removePlanItems) {
+      heartbeat.assertLeaseOwned()
+      await safeDeleteServerFilePhysical(client, "/mods", rem.filename)
+      const recordIdToDelete =
+        rem.managedContentId ||
+        currentRecords.find((c) => c.targetPath === `mods/${rem.filename}` || c.gameReleaseFileId === rem.gameReleaseFileId)?.id
+      if (recordIdToDelete) {
         await db
           .delete(schema.serverManagedContent)
-          .where(eq(schema.serverManagedContent.id, current.id))
-
-        removedCount++
+          .where(eq(schema.serverManagedContent.id, recordIdToDelete))
       }
+      removedCount++
     }
 
     // 8. Record APPLIED in server_release_syncs table and ACTIVATE release for launcher in D1

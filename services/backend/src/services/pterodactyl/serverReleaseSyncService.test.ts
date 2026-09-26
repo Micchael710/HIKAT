@@ -708,16 +708,16 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
       arrayBuffer: vi.fn().mockResolvedValue(testBytes.buffer),
     })
 
-    // 1. Initial Plan should detect physical drift and report INSTALL (isPending = true)
+    // 1. Initial Plan should report KEEP (isPending = false) because the mod is unchanged (admin deleted it manually on server)
     const initialPlan = await getServerReleaseSyncPlan(db, env, mockDriftClient as any)
-    expect(initialPlan.isPending).toBe(true)
-    expect(initialPlan.summary.toInstall).toBe(1)
-    expect(initialPlan.summary.toKeep).toBe(0)
+    expect(initialPlan.isPending).toBe(false)
+    expect(initialPlan.summary.toInstall).toBe(0)
+    expect(initialPlan.summary.toKeep).toBe(1)
 
-    // 2. Apply should restore the physical file
+    // 2. Apply should NOT re-write the manually deleted file under Option A
     const applyRes = await applyServerReleaseSync(db, env, "admin-1", false, mockDriftClient as any)
     expect(applyRes.success).toBe(true)
-    expect(mockDriftClient.writeFile).toHaveBeenCalledWith("/mods/drifted-mod.jar", expect.any(Uint8Array))
+    expect(mockDriftClient.writeFile).not.toHaveBeenCalledWith("/mods/drifted-mod.jar", expect.anything())
 
     // 3. Subsequent plan should report KEEP (isPending = false)
     const subsequentPlan = await getServerReleaseSyncPlan(db, env, mockDriftClient as any)
@@ -1124,8 +1124,9 @@ describe("Shard 08D: Server Release Sync Service Tests", () => {
 
     expect(plan.serverStatus).toBe("OFFLINE")
     expect(plan.canApply).toBe(true)
-    expect(plan.summary.toInstall).toBe(1) // Physical drift repair detected: marked as INSTALL!
-    expect(plan.items[0]?.action).toBe("INSTALL")
+    expect(plan.summary.toInstall).toBe(0)
+    expect(plan.summary.toKeep).toBe(1)
+    expect(plan.items[0]?.action).toBe("KEEP")
   })
 
   // Test 14: Server offline but listDirectory fails sets canApply = false and descriptive blockReason

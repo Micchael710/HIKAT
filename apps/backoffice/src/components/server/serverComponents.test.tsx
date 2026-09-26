@@ -840,7 +840,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     expect(screen.getByText("Servidor")).toBeDefined()
   })
 
-  it("Shard 08D Test 1b: ServerFilesView allows force deleting a GAME_RELEASE file with 'Eliminar de todas formas'", async () => {
+  it("Shard 08D Test 1b: ServerFilesView allows deleting a GAME_RELEASE file with standard 'Eliminar definitivamente'", async () => {
     const deleteSpy = vi.spyOn(serverApi, "deleteServerFile").mockResolvedValue({ success: true } as any)
     vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([
       { name: "ferritecore.jar", isFile: true, isSymlink: false, sizeBytes: 1000, modifiedAt: new Date().toISOString() },
@@ -885,14 +885,14 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
       fireEvent.click(deleteBtn)
     })
 
-    // The modal-blocked-delete should be open
-    expect(screen.getByTestId("modal-blocked-delete")).toBeDefined()
-    expect(screen.getByText("Archivo de la versión del juego")).toBeDefined()
+    // The modal-delete-confirm should be open
+    expect(screen.getByTestId("modal-delete-confirm")).toBeDefined()
+    expect(screen.getByText("Eliminar elemento")).toBeDefined()
 
-    // Force delete button should exist and say "Eliminar de todas formas"
+    // Delete button should exist and say "Eliminar definitivamente"
     const forceDeleteBtn = screen.getByTestId("button-force-delete-from-server")
     expect(forceDeleteBtn).toBeDefined()
-    expect(forceDeleteBtn.textContent).toContain("Eliminar de todas formas")
+    expect(forceDeleteBtn.textContent).toContain("Eliminar definitivamente")
 
     // Click force delete
     await act(async () => {
@@ -904,10 +904,10 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     expect(onToastMock).toHaveBeenCalledWith("Elemento eliminado exitosamente del servidor.", "success")
 
     // Modal should close
-    expect(screen.queryByTestId("modal-blocked-delete")).toBeNull()
+    expect(screen.queryByTestId("modal-delete-confirm")).toBeNull()
   })
 
-  it("Unified Delete Modal: renders unified delete modal with bullet points and badges for batch deletion with GAME_RELEASE files", async () => {
+  it("Unified Delete Modal: renders unified delete modal with bullet points for batch deletion with GAME_RELEASE files", async () => {
     const { serverContentApi } = await import("../../services/graphqlClient")
     const onToastMock = vi.fn()
     const onNavigateToGameMock = vi.fn()
@@ -974,19 +974,18 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
       fireEvent.keyDown(window, { key: "Delete" })
     })
 
-    // Modal should be open with game release layout
-    const modal = screen.getByTestId("modal-blocked-delete")
+    // Modal should be open with standard delete layout
+    const modal = screen.getByTestId("modal-delete-confirm")
     expect(modal).toBeDefined()
-    expect(screen.getByText("Archivos de la versión del juego")).toBeDefined()
+    expect(screen.getByText("Eliminar 2 elementos")).toBeDefined()
 
     // Bullet points should list both files
     expect(screen.getByText("• ferritecore.jar")).toBeDefined()
     expect(screen.getByText("• custom-plugin.jar")).toBeDefined()
-    expect(screen.getByText("Actualización")).toBeDefined()
 
     // Force delete button should exist
     const forceDeleteBtn = screen.getByTestId("button-force-delete-from-server")
-    expect(forceDeleteBtn.textContent).toContain("Eliminar de todas formas")
+    expect(forceDeleteBtn.textContent).toContain("Eliminar definitivamente")
 
     // Click force delete
     await act(async () => {
@@ -997,7 +996,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     expect(deleteSpy).toHaveBeenCalledWith("SERVER", "ferritecore.jar", "srv-1")
     expect(deleteSpy).toHaveBeenCalledWith("SERVER", "custom-plugin.jar", "srv-1")
     expect(onToastMock).toHaveBeenCalledWith("2 elementos eliminados exitosamente del servidor.", "success")
-    expect(screen.queryByTestId("modal-blocked-delete")).toBeNull()
+    expect(screen.queryByTestId("modal-delete-confirm")).toBeNull()
   })
 
   it("Unified Delete Modal: renders standard delete confirmation with bullet points for regular files", async () => {

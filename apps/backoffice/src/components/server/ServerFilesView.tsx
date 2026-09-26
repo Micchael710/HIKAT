@@ -1586,16 +1586,12 @@ export default function ServerFilesView({
 
       {/* Unified Delete Confirmation Modal for Server Files */}
       {deleteTargets && (() => {
-        const releaseItems = deleteTargets.filter(
-          (f) => getManagedRecord(f)?.managementSource === "GAME_RELEASE",
-        )
-        const hasReleaseItems = releaseItems.length > 0
         const count = deleteTargets.length
         const isSingle = count === 1
 
         return (
           <div
-            data-testid={hasReleaseItems ? "modal-blocked-delete" : "modal-delete-confirm"}
+            data-testid="modal-delete-confirm"
             style={{
               position: "fixed",
               top: 0,
@@ -1618,7 +1614,7 @@ export default function ServerFilesView({
             <div
               style={{
                 width: "100%",
-                maxWidth: 580,
+                maxWidth: 520,
                 backgroundColor: tokens.bgCard,
                 borderRadius: 18,
                 border: `1px solid ${tokens.borderSubtle}`,
@@ -1640,19 +1636,9 @@ export default function ServerFilesView({
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  {hasReleaseItems ? (
-                    <IconAlertCircle size={20} style={{ color: "#f59e0b" }} />
-                  ) : (
-                    <IconTrash style={{ width: 20, height: 20, color: "#ef4444" }} />
-                  )}
+                  <IconTrash style={{ width: 20, height: 20, color: "#ef4444" }} />
                   <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: tokens.textPrimary }}>
-                    {hasReleaseItems
-                      ? isSingle
-                        ? "Archivo de la versión del juego"
-                        : "Archivos de la versión del juego"
-                      : isSingle
-                      ? "Eliminar elemento"
-                      : `Eliminar ${count} elementos`}
+                    {isSingle ? "Eliminar elemento" : `Eliminar ${count} elementos`}
                   </h3>
                 </div>
                 <button
@@ -1674,41 +1660,8 @@ export default function ServerFilesView({
 
               {/* Modal Content */}
               <div style={{ padding: 20 }}>
-                {hasReleaseItems && (
-                  <div
-                    style={{
-                      padding: "12px 14px",
-                      marginBottom: 16,
-                      borderRadius: 10,
-                      backgroundColor: "rgba(245, 158, 11, 0.12)",
-                      border: "1px solid rgba(245, 158, 11, 0.25)",
-                      fontSize: "13px",
-                      color: isDark ? "#fbbf24" : "#b45309",
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {isSingle ? (
-                      <>
-                        El archivo <strong>{deleteTargets[0].name}</strong> pertenece a la release oficial del modpack.
-                        Para eliminarlo o actualizarlo de manera sincronizada con el cliente de los jugadores, modifícalo desde{" "}
-                        <strong>Juego → Actualizaciones</strong>.
-                      </>
-                    ) : (
-                      <>
-                        Uno o más archivos seleccionados pertenecen a la release oficial del modpack. Para eliminarlos de
-                        manera sincronizada con el cliente de los jugadores, modifícalos desde{" "}
-                        <strong>Juego → Actualizaciones</strong>.
-                      </>
-                    )}
-                  </div>
-                )}
-
                 <p style={{ margin: "0 0 16px 0", fontSize: "14px", color: tokens.textSecondary, lineHeight: 1.5 }}>
-                  {hasReleaseItems ? (
-                    isSingle
-                      ? "¿Deseas eliminar este archivo únicamente de este servidor?"
-                      : `¿Deseas eliminar los siguientes ${count} elementos únicamente de este servidor?`
-                  ) : isSingle ? (
+                  {isSingle ? (
                     <>
                       ¿Estás seguro de que deseas eliminar <strong>{deleteTargets[0].name}</strong> del servidor? Si es una carpeta, se eliminarán todos los archivos y subcarpetas que contiene.
                     </>
@@ -1735,41 +1688,19 @@ export default function ServerFilesView({
                   }}
                   className="custom-scroll"
                 >
-                  {deleteTargets.map((file) => {
-                    const isRel = getManagedRecord(file)?.managementSource === "GAME_RELEASE"
-                    return (
-                      <div
-                        key={file.name}
-                        style={{
-                          padding: "3px 0",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 8,
-                        }}
-                      >
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          • {file.name}
-                        </span>
-                        {isRel && (
-                          <span
-                            style={{
-                              fontSize: "10px",
-                              padding: "1px 6px",
-                              borderRadius: 4,
-                              backgroundColor: "rgba(245, 158, 11, 0.15)",
-                              color: "#f59e0b",
-                              flexShrink: 0,
-                              fontFamily: "inherit",
-                              fontWeight: 600,
-                            }}
-                          >
-                            Actualización
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })}
+                  {deleteTargets.map((file) => (
+                    <div
+                      key={file.name}
+                      style={{
+                        padding: "3px 0",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      • {file.name}
+                    </div>
+                  ))}
                 </div>
 
                 {/* Action buttons */}
@@ -1781,47 +1712,20 @@ export default function ServerFilesView({
                     gap: 10,
                   }}
                 >
-                  {hasReleaseItems && onNavigateToGame && (
-                    <button
-                      type="button"
-                      data-testid="button-navigate-game-from-delete"
-                      onClick={() => {
-                        setDeleteTargets(null)
-                        onNavigateToGame()
-                      }}
-                      className="launcher-btn-primary"
-                      disabled={isDeleting}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "10px 18px",
-                        borderRadius: "12px",
-                        fontWeight: 600,
-                        fontSize: "14px",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Administrar en Juego
-                    </button>
-                  )}
-
-                  {!(hasReleaseItems && onNavigateToGame) && (
-                    <button
-                      type="button"
-                      onClick={() => setDeleteTargets(null)}
-                      className="launcher-btn-secondary"
-                      disabled={isDeleting}
-                      style={{
-                        padding: "10px 18px",
-                        borderRadius: "12px",
-                        fontSize: "14px",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      Cancelar
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setDeleteTargets(null)}
+                    className="launcher-btn-secondary"
+                    disabled={isDeleting}
+                    style={{
+                      padding: "10px 18px",
+                      borderRadius: "12px",
+                      fontSize: "14px",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Cancelar
+                  </button>
 
                   <button
                     type="button"
@@ -1840,7 +1744,7 @@ export default function ServerFilesView({
                     }}
                   >
                     {isDeleting && <IconSpinner size={16} />}
-                    <span>{hasReleaseItems ? "Eliminar de todas formas" : "Eliminar definitivamente"}</span>
+                    <span>Eliminar definitivamente</span>
                   </button>
                 </div>
               </div>
