@@ -4287,7 +4287,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
 
       // The modal should now be visible asking for environment with identical provider UI
       expect(await screen.findByText("¿Dónde necesita ejecutarse este mod?")).toBeDefined()
-      expect(screen.getByText("📦 custom-mod.jar")).toBeDefined()
+      expect(screen.getByText("custom-mod.jar")).toBeDefined()
 
       // Select "Solo servidor"
       const serverOption = screen.getByTestId("option-env-server")

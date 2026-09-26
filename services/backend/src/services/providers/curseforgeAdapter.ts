@@ -744,25 +744,50 @@ export class CurseForgeAdapter implements ModProviderAdapter {
           const json = (await res.json()) as {
             data?: {
               exactMatches?: Array<{
+                id?: number
                 exactFingerprint?: number
                 file?: {
                   id: number
                   modId: number
+                  fileFingerprint?: number
                   packageFingerprint?: number
                   gameVersions?: string[]
                   sortableGameVersions?: Array<{ gameVersionName?: string; gameVersionTypeId?: number }>
                 }
+                latestFiles?: Array<{
+                  gameVersions?: string[]
+                  sortableGameVersions?: Array<{ gameVersionName?: string; gameVersionTypeId?: number }>
+                }>
               }>
+              exactFingerprints?: number[]
             }
           }
 
           const matches = json.data?.exactMatches || []
           for (const match of matches) {
-            const fp = match.exactFingerprint || match.file?.packageFingerprint
-            if (fp && match.file && match.file.modId && match.file.id) {
-              const envVal = extractCurseForgeEnvironment(match.file)
-              resultMap.set(fp, {
-                projectId: String(match.file.modId),
+            const rawFp =
+              match.file?.fileFingerprint ??
+              match.exactFingerprint ??
+              match.file?.packageFingerprint
+
+            const fp = typeof rawFp === "number" ? rawFp : rawFp ? Number(rawFp) : null
+            const targetFp = fp ?? (matches.length === 1 && chunk.length === 1 ? chunk[0] : null)
+
+            if (targetFp && match.file && match.file.id) {
+              const projectId = String(match.file.modId || match.id || "")
+              let envVal = extractCurseForgeEnvironment(match.file)
+              if (!envVal && Array.isArray(match.latestFiles)) {
+                for (const lf of match.latestFiles) {
+                  const extracted = extractCurseForgeEnvironment(lf)
+                  if (extracted) {
+                    envVal = extracted
+                    break
+                  }
+                }
+              }
+
+              resultMap.set(Number(targetFp), {
+                projectId,
                 versionId: String(match.file.id),
                 environment: envVal,
               })

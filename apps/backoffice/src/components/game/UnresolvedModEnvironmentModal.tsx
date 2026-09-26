@@ -182,9 +182,13 @@ export default function UnresolvedModEnvironmentModal({
                     fontWeight: "600",
                     color: tokens.textPrimary,
                     wordBreak: "break-all",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
                   }}
                 >
-                  📦 {unresolvedMods[0]!.filename}
+                  <IconBox size={16} style={{ flexShrink: 0, color: tokens.textSecondary }} />
+                  <span>{unresolvedMods[0]!.filename}</span>
                 </div>
 
                 <ModEnvironmentRadioGroup
@@ -275,9 +279,13 @@ export default function UnresolvedModEnvironmentModal({
                               color: tokens.textPrimary,
                               marginBottom: "8px",
                               wordBreak: "break-all",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
                             }}
                           >
-                            📦 {mod.filename}
+                            <IconBox size={14} style={{ flexShrink: 0, color: tokens.textSecondary }} />
+                            <span>{mod.filename}</span>
                           </div>
                           <ModEnvironmentRadioGroup
                             theme={theme}

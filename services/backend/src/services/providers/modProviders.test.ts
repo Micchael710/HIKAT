@@ -6290,14 +6290,32 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
           const matches: any[] = []
           if (body.fingerprints?.includes(12345678)) {
             matches.push({
-              exactFingerprint: 12345678,
               file: {
                 id: 9901,
                 modId: 4401,
+                fileFingerprint: 12345678,
                 displayName: "CF Server Mod",
                 fileName: "cf-server.jar",
                 gameVersions: ["1.21.1", "Server"],
               },
+            })
+          }
+          if (body.fingerprints?.includes(87654321)) {
+            // Mod file lacks gameVersions tag, but latestFiles defines BOTH (like CurseForge real payload)
+            matches.push({
+              file: {
+                id: 9902,
+                modId: 4402,
+                fileFingerprint: 87654321,
+                displayName: "Simple Block Physics",
+                fileName: "simpleblockphysics.jar",
+                gameVersions: ["1.21.1"],
+              },
+              latestFiles: [
+                {
+                  gameVersions: ["1.21.1", "Client", "Server"],
+                },
+              ],
             })
           }
           return {
@@ -6315,10 +6333,11 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
         { id: "1", filename: "mod-both.jar", sha1: "sha1-mod-both" },
         { id: "2", filename: "mod-client.jar", sha1: "sha1-mod-client" },
         { id: "3", filename: "cf-server.jar", sha1: "unknown-sha1", curseforgeFingerprint: 12345678 },
-        { id: "4", filename: "custom-unresolved.jar", sha1: "sha1-none", curseforgeFingerprint: 99999999 },
+        { id: "4", filename: "simpleblockphysics.jar", sha1: "unknown-sha2", curseforgeFingerprint: 87654321 },
+        { id: "5", filename: "custom-unresolved.jar", sha1: "sha1-none", curseforgeFingerprint: 99999999 },
       ])
 
-      expect(results).toHaveLength(4)
+      expect(results).toHaveLength(5)
       expect(results[0]).toEqual({
         id: "1",
         filename: "mod-both.jar",
@@ -6345,6 +6364,14 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       })
       expect(results[3]).toEqual({
         id: "4",
+        filename: "simpleblockphysics.jar",
+        environment: "BOTH",
+        provider: "CURSEFORGE",
+        projectId: "4402",
+        versionId: "9902",
+      })
+      expect(results[4]).toEqual({
+        id: "5",
         filename: "custom-unresolved.jar",
         environment: null,
         provider: null,
