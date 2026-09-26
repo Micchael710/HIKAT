@@ -863,6 +863,10 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       const result = await adapter.searchMods(env, "faithful", "1.21.1", "", 20, 0, "RESOURCE_PACK")
       expect(result.items.length).toBe(1)
       expect(result.items[0]!.projectId).toBe("101")
+      const searchCall = mockFetch.mock.calls.find((c: any) => String(c[0]).includes("/mods/search"))
+      expect(searchCall).toBeDefined()
+      expect(String(searchCall![0])).toContain("sortField=2")
+      expect(String(searchCall![0])).toContain("sortOrder=desc")
     })
 
     it("parses only algo 1 (SHA-1) and algo 2 (MD5) from CurseForge, rejecting algo 3 as SHA-256", async () => {

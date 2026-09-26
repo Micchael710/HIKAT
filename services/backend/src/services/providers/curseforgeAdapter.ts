@@ -206,6 +206,8 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       gameVersion: minecraftVersion,
       pageSize: String(Math.min(limit || 20, 50)),
       index: String(offset || 0),
+      sortField: "2",
+      sortOrder: "desc",
     }
 
     if (contentType === "MOD" && loader && CURSEFORGE_LOADER_TYPE_MAP[loader] !== undefined) {
