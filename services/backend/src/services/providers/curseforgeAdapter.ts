@@ -736,7 +736,10 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       try {
         const res = await fetch(`${baseUrl}/fingerprints/${MINECRAFT_GAME_ID}`, {
           method: "POST",
-          headers: this.getHeaders(env),
+          headers: {
+            ...this.getHeaders(env),
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({ fingerprints: chunk }),
           signal: controller.signal,
         })
