@@ -1777,9 +1777,8 @@ export default function ServerFilesView({
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: hasReleaseItems && onNavigateToGame ? "space-between" : "flex-end",
-                    gap: 12,
-                    flexWrap: "nowrap",
+                    justifyContent: "flex-end",
+                    gap: 10,
                   }}
                 >
                   {hasReleaseItems && onNavigateToGame && (
@@ -1801,22 +1800,13 @@ export default function ServerFilesView({
                         fontWeight: 600,
                         fontSize: "14px",
                         whiteSpace: "nowrap",
-                        flexShrink: 0,
                       }}
                     >
                       Administrar en Juego
                     </button>
                   )}
 
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      marginLeft: hasReleaseItems && onNavigateToGame ? "auto" : undefined,
-                      flexShrink: 0,
-                    }}
-                  >
+                  {!(hasReleaseItems && onNavigateToGame) && (
                     <button
                       type="button"
                       onClick={() => setDeleteTargets(null)}
@@ -1831,27 +1821,27 @@ export default function ServerFilesView({
                     >
                       Cancelar
                     </button>
+                  )}
 
-                    <button
-                      type="button"
-                      data-testid="button-force-delete-from-server"
-                      onClick={handleExecuteDelete}
-                      disabled={isDeleting}
-                      className="launcher-btn-danger"
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "10px 20px",
-                        borderRadius: "12px",
-                        fontSize: "14px",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {isDeleting && <IconSpinner size={16} />}
-                      <span>{hasReleaseItems ? "Eliminar de todas formas" : "Eliminar definitivamente"}</span>
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    data-testid="button-force-delete-from-server"
+                    onClick={handleExecuteDelete}
+                    disabled={isDeleting}
+                    className="launcher-btn-danger"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      padding: "10px 20px",
+                      borderRadius: "12px",
+                      fontSize: "14px",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {isDeleting && <IconSpinner size={16} />}
+                    <span>{hasReleaseItems ? "Eliminar de todas formas" : "Eliminar definitivamente"}</span>
+                  </button>
                 </div>
               </div>
             </div>
