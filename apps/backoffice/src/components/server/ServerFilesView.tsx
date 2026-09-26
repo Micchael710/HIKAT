@@ -1618,7 +1618,7 @@ export default function ServerFilesView({
             <div
               style={{
                 width: "100%",
-                maxWidth: 540,
+                maxWidth: 580,
                 backgroundColor: tokens.bgCard,
                 borderRadius: 18,
                 border: `1px solid ${tokens.borderSubtle}`,
@@ -1779,7 +1779,7 @@ export default function ServerFilesView({
                     alignItems: "center",
                     justifyContent: hasReleaseItems && onNavigateToGame ? "space-between" : "flex-end",
                     gap: 12,
-                    flexWrap: "wrap",
+                    flexWrap: "nowrap",
                   }}
                 >
                   {hasReleaseItems && onNavigateToGame && (
@@ -1801,13 +1801,22 @@ export default function ServerFilesView({
                         fontWeight: 600,
                         fontSize: "14px",
                         whiteSpace: "nowrap",
+                        flexShrink: 0,
                       }}
                     >
-                      Administrar en Juego →
+                      Administrar en Juego
                     </button>
                   )}
 
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: hasReleaseItems && onNavigateToGame ? "auto" : undefined }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      marginLeft: hasReleaseItems && onNavigateToGame ? "auto" : undefined,
+                      flexShrink: 0,
+                    }}
+                  >
                     <button
                       type="button"
                       onClick={() => setDeleteTargets(null)}
