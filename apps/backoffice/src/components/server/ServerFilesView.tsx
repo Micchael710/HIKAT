@@ -31,6 +31,7 @@ import NewFolderModal from "../game/NewFolderModal"
 import RenameModal from "../game/RenameModal"
 import { ServerModSearchModal } from "./providers/ServerModSearchModal"
 import { ServerReleaseSyncModal } from "./ServerReleaseSyncModal"
+import { formatEnvironmentLabel, getEnvironmentBadgeStyle } from "../game/ModEnvironmentRadioGroup"
 
 interface ServerFilesViewProps {
   theme: ThemeMode
@@ -1079,6 +1080,7 @@ export default function ServerFilesView({
                     />
                   </th>
                   <th style={{ padding: "10px 14px", fontWeight: "600" }}>Nombre</th>
+                  <th style={{ padding: "10px 14px", width: "150px", fontWeight: "600" }}>Entorno</th>
                   <th style={{ padding: "10px 14px", width: "120px", fontWeight: "600" }}>Tamaño</th>
                   <th style={{ padding: "10px 14px", width: "150px", fontWeight: "600" }}>Modificado</th>
                   <th style={{ padding: "10px 14px", width: "140px", fontWeight: "600", textAlign: "right" }}>
@@ -1190,6 +1192,19 @@ export default function ServerFilesView({
                             </span>
                           )}
                         </div>
+                      </td>
+
+                      <td style={{ padding: "10px 14px" }}>
+                        {managed?.environment ? (
+                          <span
+                            data-testid={`badge-environment-${managed.environment.toLowerCase()}`}
+                            style={getEnvironmentBadgeStyle(managed.environment, isDark)}
+                          >
+                            {formatEnvironmentLabel(managed.environment)}
+                          </span>
+                        ) : (
+                          <span style={{ color: tokens.textMuted }}>—</span>
+                        )}
                       </td>
 
                       <td style={{ padding: "10px 14px", color: tokens.textSecondary, fontFamily: "monospace" }}>

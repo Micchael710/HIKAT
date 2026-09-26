@@ -4363,6 +4363,86 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       expect(screen.queryByText("¿Dónde necesita ejecutarse este mod?")).toBeNull()
       expect(createBatchSpy).not.toHaveBeenCalled()
     })
+
+    it("renders Entorno column and environment badges for mods in GameFilesExplorer", async () => {
+      const onRefresh = vi.fn().mockResolvedValue(undefined)
+      const onToast = vi.fn()
+
+      const files: any[] = [
+        {
+          id: "f-1",
+          name: "client-mod.jar",
+          logicalPath: "mods/client-mod.jar",
+          category: "MOD",
+          sha256: "hash1",
+          sizeBytes: 1024,
+          policy: "NO_MODIFICABLE",
+          effectivePolicy: "NO_MODIFICABLE",
+          isInherited: false,
+          isDirectory: false,
+          sourceEnvironment: "CLIENT",
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: "f-2",
+          name: "server-mod.jar",
+          logicalPath: "mods/server-mod.jar",
+          category: "MOD",
+          sha256: "hash2",
+          sizeBytes: 2048,
+          policy: "NO_MODIFICABLE",
+          effectivePolicy: "NO_MODIFICABLE",
+          isInherited: false,
+          isDirectory: false,
+          sourceEnvironment: "SERVER",
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: "f-3",
+          name: "both-mod.jar",
+          logicalPath: "mods/both-mod.jar",
+          category: "MOD",
+          sha256: "hash3",
+          sizeBytes: 4096,
+          policy: "NO_MODIFICABLE",
+          effectivePolicy: "NO_MODIFICABLE",
+          isInherited: false,
+          isDirectory: false,
+          sourceEnvironment: "BOTH",
+          createdAt: new Date().toISOString(),
+        },
+      ]
+
+      render(
+        <GameFilesExplorer
+          serverId="srv-1"
+          theme="dark"
+          files={files}
+          isDraft={true}
+          onRefresh={onRefresh}
+          onToast={onToast}
+        />,
+      )
+
+      // Navigate to 'mods' folder
+      const modsFolder = screen.getByText("mods")
+      await act(async () => {
+        fireEvent.doubleClick(modsFolder)
+      })
+
+      // Column header
+      expect(screen.getByText("Entorno")).toBeDefined()
+
+      // Environment badges
+      expect(screen.getByTestId("badge-environment-client")).toBeDefined()
+      expect(screen.getByText("Solo cliente")).toBeDefined()
+
+      expect(screen.getByTestId("badge-environment-server")).toBeDefined()
+      expect(screen.getByText("Solo servidor")).toBeDefined()
+
+      expect(screen.getByTestId("badge-environment-both")).toBeDefined()
+      expect(screen.getByText("Cliente y servidor")).toBeDefined()
+    })
   })
 })
 

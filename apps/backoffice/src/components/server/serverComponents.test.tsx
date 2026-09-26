@@ -792,6 +792,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
         sha256: "hash1",
         sizeBytes: 1000,
         contentType: "MOD",
+        environment: "BOTH",
         status: "INSTALLED",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -804,6 +805,7 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
         sha256: "hash2",
         sizeBytes: 2000,
         contentType: "MOD",
+        environment: "SERVER",
         status: "INSTALLED",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -833,11 +835,20 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     // "Buscar contenido" button exists
     expect(screen.getByTestId("button-open-server-search")).toBeDefined()
 
+    // Entorno column exists
+    expect(screen.getByText("Entorno")).toBeDefined()
+
     // Badges exist for managed files
     expect(screen.getByTestId("badge-managed-game_release")).toBeDefined()
     expect(screen.getByText("Release")).toBeDefined()
     expect(screen.getByTestId("badge-managed-server_direct")).toBeDefined()
     expect(screen.getByText("Servidor")).toBeDefined()
+
+    // Environment badges exist
+    expect(screen.getByTestId("badge-environment-both")).toBeDefined()
+    expect(screen.getByText("Cliente y servidor")).toBeDefined()
+    expect(screen.getByTestId("badge-environment-server")).toBeDefined()
+    expect(screen.getByText("Solo servidor")).toBeDefined()
   })
 
   it("Shard 08D Test 1b: ServerFilesView allows deleting a GAME_RELEASE file with standard 'Eliminar definitivamente'", async () => {

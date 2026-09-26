@@ -108,3 +108,54 @@ export default function ModEnvironmentRadioGroup({
     </div>
   )
 }
+
+export function formatEnvironmentLabel(env: ModEnvironment | string): string {
+  switch (env) {
+    case "SERVER":
+      return "Solo servidor"
+    case "CLIENT":
+      return "Solo cliente"
+    case "BOTH":
+    default:
+      return "Cliente y servidor"
+  }
+}
+
+export function getEnvironmentBadgeStyle(env: ModEnvironment | string, isDark: boolean): React.CSSProperties {
+  switch (env) {
+    case "SERVER":
+      return {
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: "6px",
+        fontSize: "11px",
+        fontWeight: "600",
+        backgroundColor: isDark ? "rgba(168, 85, 247, 0.15)" : "#f3e8ff",
+        border: `1px solid ${isDark ? "rgba(168, 85, 247, 0.3)" : "#e9d5ff"}`,
+        color: isDark ? "#c084fc" : "#7e22ce",
+      }
+    case "CLIENT":
+      return {
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: "6px",
+        fontSize: "11px",
+        fontWeight: "600",
+        backgroundColor: isDark ? "rgba(59, 130, 246, 0.15)" : "#eff6ff",
+        border: `1px solid ${isDark ? "rgba(59, 130, 246, 0.3)" : "#bfdbfe"}`,
+        color: isDark ? "#60a5fa" : "#1d4ed8",
+      }
+    case "BOTH":
+    default:
+      return {
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: "6px",
+        fontSize: "11px",
+        fontWeight: "600",
+        backgroundColor: isDark ? "rgba(20, 184, 166, 0.15)" : "#ccfbf1",
+        border: `1px solid ${isDark ? "rgba(20, 184, 166, 0.3)" : "#99f6e4"}`,
+        color: isDark ? "#2dd4bf" : "#0f766e",
+      }
+  }
+}

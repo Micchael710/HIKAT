@@ -37,6 +37,7 @@ import { ModSearchModal } from "./providers/ModSearchModal"
 import { getThemeTokens } from "../../theme/tokens"
 import GameEnvironmentModal from "./GameEnvironmentModal"
 import UnresolvedModEnvironmentModal from "./UnresolvedModEnvironmentModal"
+import { formatEnvironmentLabel, getEnvironmentBadgeStyle } from "./ModEnvironmentRadioGroup"
 
 interface GameFilesExplorerProps {
   theme: ThemeMode
@@ -66,6 +67,7 @@ interface ExplorerItem {
   effectivePolicy: SyncPolicy
   isInherited: boolean
   changeStatus?: string | null
+  sourceEnvironment?: ModEnvironment | null
   rawFile?: AdminGameFile
 }
 
@@ -226,6 +228,7 @@ export default function GameFilesExplorer({
             effectivePolicy: f.effectivePolicy,
             isInherited: f.isInherited,
             changeStatus: f.changeStatus,
+            sourceEnvironment: f.sourceEnvironment ?? null,
             rawFile: f,
           })
         } else {
@@ -266,6 +269,7 @@ export default function GameFilesExplorer({
               effectivePolicy: f.effectivePolicy,
               isInherited: f.isInherited,
               changeStatus: f.changeStatus,
+              sourceEnvironment: f.sourceEnvironment ?? null,
               rawFile: f,
             })
           } else {
@@ -1225,6 +1229,7 @@ export default function GameFilesExplorer({
                   />
                 </th>
                 <th style={{ padding: "10px 14px", fontWeight: "600" }}>Nombre</th>
+                <th style={{ padding: "10px 14px", width: "150px", fontWeight: "600" }}>Entorno</th>
                 <th style={{ padding: "10px 14px", width: "120px", fontWeight: "600" }}>Tamaño</th>
                 <th style={{ padding: "10px 14px", width: "160px", fontWeight: "600" }}>Sincronización</th>
                 <th style={{ padding: "10px 14px", width: "160px", fontWeight: "600" }}>Estado</th>
@@ -1275,6 +1280,19 @@ export default function GameFilesExplorer({
                           {item.name}
                         </span>
                       </div>
+                    </td>
+
+                    <td style={{ padding: "10px 14px" }}>
+                      {!item.isDirectory && (item.sourceEnvironment || item.category === "MOD" || item.logicalPath.startsWith("mods/") || item.name.toLowerCase().endsWith(".jar")) ? (
+                        <span
+                          data-testid={`badge-environment-${(item.sourceEnvironment || "BOTH").toLowerCase()}`}
+                          style={getEnvironmentBadgeStyle(item.sourceEnvironment || "BOTH", isDark)}
+                        >
+                          {formatEnvironmentLabel(item.sourceEnvironment || "BOTH")}
+                        </span>
+                      ) : (
+                        <span style={{ color: tokens.textMuted }}>—</span>
+                      )}
                     </td>
 
                     <td style={{ padding: "10px 14px", color: tokens.textSecondary, fontFamily: "monospace" }}>
