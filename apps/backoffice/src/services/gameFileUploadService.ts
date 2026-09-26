@@ -115,7 +115,7 @@ export interface BatchUploadProgress {
 }
 
 /**
- * Uploads a batch of game files with a strict concurrency limit of 2 files simultaneously.
+ * Uploads a batch of game files with a strict concurrency limit of 10 files simultaneously.
  * Each file uses up to 4 multipart parts of 10 MiB concurrently without loading full files in memory.
  */
 export async function uploadGameFilesBatch(
@@ -130,7 +130,7 @@ export async function uploadGameFilesBatch(
     bucket: string
   },
   onProgress?: (progress: BatchUploadProgress) => void,
-  concurrencyLimit = 2,
+  concurrencyLimit = 10,
 ): Promise<Array<{
   uploadToken: string
   sha256: string

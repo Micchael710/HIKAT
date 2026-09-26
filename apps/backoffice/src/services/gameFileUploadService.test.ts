@@ -95,7 +95,7 @@ describe("gameFileUploadService", () => {
     )
   })
 
-  it("uploadGameFilesBatch limits concurrency to maximum 2 simultaneous files", async () => {
+  it("uploadGameFilesBatch limits concurrency to maximum 10 simultaneous files", async () => {
     const { Upload } = await import("@aws-sdk/lib-storage")
 
     let activeUploads = 0
@@ -115,7 +115,7 @@ describe("gameFileUploadService", () => {
       } as any
     })
 
-    const items = Array.from({ length: 6 }, (_, i) => ({
+    const items = Array.from({ length: 25 }, (_, i) => ({
       file: new File([new Uint8Array([0x61 + i])], `file-${i}.txt`, { type: "text/plain" }),
       uploadToken: `token-${i}`,
       objectKey: `game-files/file-${i}`,
@@ -131,10 +131,9 @@ describe("gameFileUploadService", () => {
         bucket: "hikat-r2",
       },
       undefined,
-      2,
     )
 
-    expect(results).toHaveLength(6)
-    expect(maxObservedActiveUploads).toBe(2)
+    expect(results).toHaveLength(25)
+    expect(maxObservedActiveUploads).toBe(10)
   })
 })

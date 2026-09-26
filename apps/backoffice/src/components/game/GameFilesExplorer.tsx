@@ -580,7 +580,7 @@ export default function GameFilesExplorer({
         serverId,
       )
 
-      // 3. Upload files directly to R2 multipart with concurrency 2
+      // 3. Upload files directly to R2 multipart with concurrency 10
       const batchItems = preparedItems.map((p, idx) => ({
         file: p.file,
         uploadToken: batchPayload.items[idx]!.uploadToken,
