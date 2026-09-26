@@ -907,6 +907,175 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     expect(screen.queryByTestId("modal-blocked-delete")).toBeNull()
   })
 
+  it("Unified Delete Modal: renders unified delete modal with bullet points and badges for batch deletion with GAME_RELEASE files", async () => {
+    const { serverContentApi } = await import("../../services/graphqlClient")
+    const onToastMock = vi.fn()
+    const onNavigateToGameMock = vi.fn()
+    const deleteSpy = vi.spyOn(serverApi, "deleteServerFile").mockResolvedValue(true)
+
+    vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([
+      {
+        name: "ferritecore.jar",
+        isFile: true,
+        isSymlink: false,
+        sizeBytes: 1024,
+        modifiedAt: new Date().toISOString(),
+      },
+      {
+        name: "custom-plugin.jar",
+        isFile: true,
+        isSymlink: false,
+        sizeBytes: 2048,
+        modifiedAt: new Date().toISOString(),
+      },
+    ])
+    vi.spyOn(serverContentApi, "getServerManagedContent").mockResolvedValue([
+      {
+        id: "smc-1",
+        name: "ferritecore.jar",
+        targetPath: "mods/ferritecore.jar",
+        sizeBytes: 1024,
+        managementSource: "GAME_RELEASE",
+        sha256: "hash-ferrite",
+        contentType: "MOD",
+        status: "INSTALLED",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      isPending: false,
+      items: [],
+      summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 1 },
+      serverStatus: "OFFLINE",
+      canApply: true,
+    })
+
+    await act(async () => {
+      render(
+        <ServerFilesView
+          serverId="srv-1"
+          theme="dark"
+          serverStatus="OFFLINE"
+          onToast={onToastMock}
+          onNavigateToGame={onNavigateToGameMock}
+        />,
+      )
+    })
+
+    // Select both files using header checkbox (Select All)
+    const selectAllCheckbox = screen.getAllByRole("checkbox")[0]
+    await act(async () => {
+      fireEvent.click(selectAllCheckbox)
+    })
+
+    // Trigger Delete via Delete key
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Delete" })
+    })
+
+    // Modal should be open with game release layout
+    const modal = screen.getByTestId("modal-blocked-delete")
+    expect(modal).toBeDefined()
+    expect(screen.getByText("Archivos de la versión del juego")).toBeDefined()
+
+    // Bullet points should list both files
+    expect(screen.getByText("• ferritecore.jar")).toBeDefined()
+    expect(screen.getByText("• custom-plugin.jar")).toBeDefined()
+    expect(screen.getByText("Actualización")).toBeDefined()
+
+    // Force delete button should exist
+    const forceDeleteBtn = screen.getByTestId("button-force-delete-from-server")
+    expect(forceDeleteBtn.textContent).toContain("Eliminar de todas formas")
+
+    // Click force delete
+    await act(async () => {
+      fireEvent.click(forceDeleteBtn)
+    })
+
+    // Should call deleteServerFile for both files
+    expect(deleteSpy).toHaveBeenCalledWith("SERVER", "ferritecore.jar", "srv-1")
+    expect(deleteSpy).toHaveBeenCalledWith("SERVER", "custom-plugin.jar", "srv-1")
+    expect(onToastMock).toHaveBeenCalledWith("2 elementos eliminados exitosamente del servidor.", "success")
+    expect(screen.queryByTestId("modal-blocked-delete")).toBeNull()
+  })
+
+  it("Unified Delete Modal: renders standard delete confirmation with bullet points for regular files", async () => {
+    const { serverContentApi } = await import("../../services/graphqlClient")
+    const onToastMock = vi.fn()
+    const deleteSpy = vi.spyOn(serverApi, "deleteServerFile").mockResolvedValue(true)
+
+    vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([
+      {
+        name: "log1.txt",
+        isFile: true,
+        isSymlink: false,
+        sizeBytes: 500,
+        modifiedAt: new Date().toISOString(),
+      },
+      {
+        name: "log2.txt",
+        isFile: true,
+        isSymlink: false,
+        sizeBytes: 800,
+        modifiedAt: new Date().toISOString(),
+      },
+    ])
+    vi.spyOn(serverContentApi, "getServerManagedContent").mockResolvedValue([])
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      isPending: false,
+      items: [],
+      summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 0 },
+      serverStatus: "OFFLINE",
+      canApply: true,
+    })
+
+    await act(async () => {
+      render(
+        <ServerFilesView
+          serverId="srv-1"
+          theme="dark"
+          serverStatus="OFFLINE"
+          onToast={onToastMock}
+        />,
+      )
+    })
+
+    // Select both files
+    const selectAllCheckbox = screen.getAllByRole("checkbox")[0]
+    await act(async () => {
+      fireEvent.click(selectAllCheckbox)
+    })
+
+    // Press Delete key
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Delete" })
+    })
+
+    // Modal should be open with standard delete confirm layout
+    const modal = screen.getByTestId("modal-delete-confirm")
+    expect(modal).toBeDefined()
+    expect(screen.getByText("Eliminar 2 elementos")).toBeDefined()
+
+    // Bullet points should list both files
+    expect(screen.getByText("• log1.txt")).toBeDefined()
+    expect(screen.getByText("• log2.txt")).toBeDefined()
+    expect(screen.queryByText("Actualización")).toBeNull()
+
+    // Confirm button
+    const confirmBtn = screen.getByRole("button", { name: /Eliminar definitivamente/i })
+    expect(confirmBtn).toBeDefined()
+
+    await act(async () => {
+      fireEvent.click(confirmBtn)
+    })
+
+    expect(deleteSpy).toHaveBeenCalledWith("SERVER", "log1.txt", "srv-1")
+    expect(deleteSpy).toHaveBeenCalledWith("SERVER", "log2.txt", "srv-1")
+    expect(onToastMock).toHaveBeenCalledWith("2 elementos eliminados exitosamente del servidor.", "success")
+    expect(screen.queryByTestId("modal-delete-confirm")).toBeNull()
+  })
+
   it("Shard 08D Test 2: ServerFilesView renders pending release sync banner and opens modal", async () => {
     const { serverContentApi } = await import("../../services/graphqlClient")
 

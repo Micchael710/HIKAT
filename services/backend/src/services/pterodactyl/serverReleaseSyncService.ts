@@ -276,7 +276,19 @@ export async function getServerReleaseSyncPlan(
     toKeep: items.filter((i) => i.action === "KEEP").length,
   }
 
-  const isPending = summary.toInstall > 0 || summary.toUpdate > 0 || summary.toRemove > 0
+  // Check if this published release has already been applied to the server
+  const appliedSyncConditions = [
+    eq(schema.serverReleaseSyncs.releaseId, published.id),
+    eq(schema.serverReleaseSyncs.status, "APPLIED"),
+  ]
+  const alreadyApplied = await db
+    .select({ id: schema.serverReleaseSyncs.id })
+    .from(schema.serverReleaseSyncs)
+    .where(and(...appliedSyncConditions))
+    .limit(1)
+    .get()
+
+  const isPending = !alreadyApplied && (summary.toInstall > 0 || summary.toUpdate > 0 || summary.toRemove > 0)
   const canApply = serverStatus === "OFFLINE" && physicalFilesAvailable
   let blockReason: string | null = null
   if (!canApply) {

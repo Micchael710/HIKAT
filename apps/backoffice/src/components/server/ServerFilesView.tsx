@@ -29,7 +29,6 @@ import {
 import { getThemeTokens } from "../../theme/tokens"
 import NewFolderModal from "../game/NewFolderModal"
 import RenameModal from "../game/RenameModal"
-import ConfirmDeleteModal from "../game/ConfirmDeleteModal"
 import { ServerModSearchModal } from "./providers/ServerModSearchModal"
 import { ServerReleaseSyncModal } from "./ServerReleaseSyncModal"
 
@@ -80,14 +79,9 @@ export default function ServerFilesView({
   // Modals state
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false)
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
-  const [blockedDeleteTarget, setBlockedDeleteTarget] = useState<{
-    file: ServerFileItem
-    managed: ServerManagedContentItem
-  } | null>(null)
-
   const [isNewFolderOpen, setIsNewFolderOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<ServerFileItem | null>(null)
-  const [deleteTargets, setDeleteTargets] = useState<string[] | null>(null)
+  const [deleteTargets, setDeleteTargets] = useState<ServerFileItem[] | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
   // Text editor modal state
@@ -210,7 +204,12 @@ export default function ServerFilesView({
       const fullPath = currentPath ? `${currentPath}/${file.name}` : file.name
       const normalized = fullPath.replace(/^\//, "")
       return managedContent.find(
-        (m) => m.targetPath === normalized || m.targetPath === fullPath || m.name === file.name,
+        (m) =>
+          m.targetPath === normalized ||
+          m.targetPath === fullPath ||
+          m.targetPath === `mods/${normalized}` ||
+          m.targetPath.endsWith(`/${file.name}`) ||
+          m.name === file.name,
       )
     },
     [currentPath, managedContent],
@@ -294,46 +293,43 @@ export default function ServerFilesView({
 
   // Delete attempt handler
   const handleAttemptDelete = (file: ServerFileItem) => {
-    const managed = getManagedRecord(file)
-    if (managed && managed.managementSource === "GAME_RELEASE") {
-      setBlockedDeleteTarget({ file, managed })
-      return
-    }
-    setDeleteTargets([file.name])
+    setDeleteTargets([file])
   }
 
   // Batch delete selected items
   const handleDeleteSelected = () => {
     if (selectedNames.size === 0 || isDisconnected) return
-    if (selectedNames.size === 1) {
-      const name = Array.from(selectedNames)[0]
-      const file = filteredFiles.find((f) => f.name === name)
-      if (file) {
-        handleAttemptDelete(file)
-        return
-      }
+    const items = filteredFiles.filter((f) => selectedNames.has(f.name))
+    if (items.length > 0) {
+      setDeleteTargets(items)
     }
-    setDeleteTargets(Array.from(selectedNames))
   }
 
-  // Force delete for GAME_RELEASE managed files directly from server
-  const handleForceDelete = async (file: ServerFileItem) => {
-    if (isDisconnected) return
+  // Execute deletion for all items in deleteTargets (handles both managed and regular files)
+  const handleExecuteDelete = async () => {
+    if (!deleteTargets || isDisconnected) return
     setIsDeleting(true)
-    const targetRelative = currentPath ? `${currentPath}/${file.name}` : file.name
     try {
-      await serverApi.deleteServerFile("SERVER", targetRelative, serverId)
-      onToast("Elemento eliminado exitosamente del servidor.", "success")
-      setBlockedDeleteTarget(null)
+      for (const file of deleteTargets) {
+        const targetRelative = currentPath ? `${currentPath}/${file.name}` : file.name
+        await serverApi.deleteServerFile("SERVER", targetRelative, serverId)
+      }
+      onToast(
+        deleteTargets.length === 1
+          ? "Elemento eliminado exitosamente del servidor."
+          : `${deleteTargets.length} elementos eliminados exitosamente del servidor.`,
+        "success",
+      )
       setSelectedNames((prev) => {
         const next = new Set(prev)
-        next.delete(file.name)
+        for (const file of deleteTargets) next.delete(file.name)
         return next
       })
+      setDeleteTargets(null)
       await fetchFiles(true)
     } catch (err: unknown) {
       onToast(
-        err instanceof Error ? err.message : "Error al eliminar el elemento.",
+        err instanceof Error ? err.message : "Error al eliminar elementos.",
         "error",
       )
     } finally {
@@ -1588,148 +1584,282 @@ export default function ServerFilesView({
         />
       )}
 
-      {/* Batch / Single Delete Confirmation Modal (Reused from game) */}
-      {deleteTargets && (
-        <ConfirmDeleteModal
-          theme={theme}
-          paths={deleteTargets}
-          onClose={() => setDeleteTargets(null)}
-          onConfirm={async () => {
-            setIsDeleting(true)
-            try {
-              for (const name of deleteTargets) {
-                const targetRelative = currentPath ? `${currentPath}/${name}` : name
-                await serverApi.deleteServerFile("SERVER", targetRelative, serverId)
-              }
-              onToast(
-                deleteTargets.length === 1
-                  ? "Elemento eliminado exitosamente."
-                  : `${deleteTargets.length} elementos eliminados exitosamente.`,
-                "success",
-              )
-              setSelectedNames((prev) => {
-                const next = new Set(prev)
-                for (const name of deleteTargets) next.delete(name)
-                return next
-              })
-              await fetchFiles(true)
-            } finally {
-              setIsDeleting(false)
-            }
-          }}
-        />
-      )}
+      {/* Unified Delete Confirmation Modal for Server Files */}
+      {deleteTargets && (() => {
+        const releaseItems = deleteTargets.filter(
+          (f) => getManagedRecord(f)?.managementSource === "GAME_RELEASE",
+        )
+        const hasReleaseItems = releaseItems.length > 0
+        const count = deleteTargets.length
+        const isSingle = count === 1
 
-      {/* Blocked Delete for GAME_RELEASE Modal */}
-      {blockedDeleteTarget && (
-        <div
-          data-testid="modal-blocked-delete"
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0, 0, 0, 0.65)",
-            backdropFilter: "blur(4px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 900,
-            padding: 16,
-          }}
-        >
+        return (
           <div
+            data-testid={hasReleaseItems ? "modal-blocked-delete" : "modal-delete-confirm"}
             style={{
-              width: "100%",
-              maxWidth: 460,
-              borderRadius: 20,
-              background: isDark ? "#131c23" : "#ffffff",
-              border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)"}`,
-              padding: 28,
-              boxShadow: "0 24px 60px rgba(0,0,0,0.35)",
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: "rgba(0, 0, 0, 0.75)",
+              backdropFilter: "blur(6px)",
               display: "flex",
-              flexDirection: "column",
-              gap: 16,
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1000,
+              padding: 20,
+              boxSizing: "border-box",
+            }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !isDeleting) setDeleteTargets(null)
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <IconAlertCircle size={28} style={{ color: "#f59e0b" }} />
-              <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700, color: isDark ? "#ffffff" : "#0f172a" }}>
-                Archivo de la versión del juego
-              </h3>
-            </div>
-
-            <p
+            <div
               style={{
-                margin: 0,
-                fontSize: "0.875rem",
-                color: isDark ? "rgba(255,255,255,0.8)" : "#334155",
-                lineHeight: 1.5,
+                width: "100%",
+                maxWidth: 480,
+                backgroundColor: tokens.bgCard,
+                borderRadius: 18,
+                border: `1px solid ${tokens.borderSubtle}`,
+                boxShadow: tokens.cardShadowLg,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
               }}
             >
-              El archivo <strong>{blockedDeleteTarget.file.name}</strong> pertenece a la release oficial del modpack.
-              Para eliminarlo o actualizarlo de manera sincronizada con el cliente de los jugadores, modifícalo desde{" "}
-              <strong>Juego → Actualizaciones</strong>.
-            </p>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => setBlockedDeleteTarget(null)}
-                className="launcher-btn-secondary"
-                disabled={isDeleting}
-              >
-                Cancelar
-              </button>
-
-              <button
-                type="button"
-                data-testid="button-force-delete-from-server"
-                onClick={() => handleForceDelete(blockedDeleteTarget.file)}
-                disabled={isDeleting}
+              {/* Modal Header */}
+              <div
                 style={{
-                  display: "inline-flex",
+                  padding: "18px 20px",
+                  borderBottom: `1px solid ${tokens.borderSubtle}`,
+                  display: "flex",
                   alignItems: "center",
-                  gap: 6,
-                  padding: "8px 16px",
-                  borderRadius: 10,
-                  border: "none",
-                  background: "#dc2626",
-                  color: "#ffffff",
-                  cursor: isDeleting ? "not-allowed" : "pointer",
-                  fontWeight: 600,
-                  fontSize: "13px",
+                  justifyContent: "space-between",
+                  backgroundColor: tokens.bgCardInner,
                 }}
               >
-                {isDeleting ? <IconSpinner size={15} /> : <IconTrash size={15} />}
-                <span>{isDeleting ? "Eliminando..." : "Eliminar de todas formas"}</span>
-              </button>
-
-              {onNavigateToGame && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {hasReleaseItems ? (
+                    <IconAlertCircle size={20} style={{ color: "#f59e0b" }} />
+                  ) : (
+                    <IconTrash style={{ width: 20, height: 20, color: "#ef4444" }} />
+                  )}
+                  <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: tokens.textPrimary }}>
+                    {hasReleaseItems
+                      ? isSingle
+                        ? "Archivo de la versión del juego"
+                        : "Archivos de la versión del juego"
+                      : isSingle
+                      ? "Eliminar elemento"
+                      : `Eliminar ${count} elementos`}
+                  </h3>
+                </div>
                 <button
                   type="button"
-                  data-testid="button-navigate-game-from-delete"
-                  onClick={() => {
-                    setBlockedDeleteTarget(null)
-                    onNavigateToGame()
-                  }}
-                  className="launcher-btn-primary"
+                  onClick={() => !isDeleting && setDeleteTargets(null)}
                   disabled={isDeleting}
                   style={{
-                    padding: "8px 16px",
-                    borderRadius: 10,
-                    fontWeight: 600,
-                    fontSize: "13px",
+                    background: "transparent",
+                    border: "none",
+                    color: tokens.textMuted,
+                    cursor: isDeleting ? "not-allowed" : "pointer",
+                    padding: 4,
+                    display: "flex",
                   }}
                 >
-                  Ir a Actualizaciones →
+                  <IconCross size={18} />
                 </button>
-              )}
+              </div>
+
+              {/* Modal Content */}
+              <div style={{ padding: 20 }}>
+                {hasReleaseItems && (
+                  <div
+                    style={{
+                      padding: "12px 14px",
+                      marginBottom: 16,
+                      borderRadius: 10,
+                      backgroundColor: "rgba(245, 158, 11, 0.12)",
+                      border: "1px solid rgba(245, 158, 11, 0.25)",
+                      fontSize: "13px",
+                      color: isDark ? "#fbbf24" : "#b45309",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {isSingle ? (
+                      <>
+                        El archivo <strong>{deleteTargets[0].name}</strong> pertenece a la release oficial del modpack.
+                        Para eliminarlo o actualizarlo de manera sincronizada con el cliente de los jugadores, modifícalo desde{" "}
+                        <strong>Juego → Actualizaciones</strong>.
+                      </>
+                    ) : (
+                      <>
+                        Uno o más archivos seleccionados pertenecen a la release oficial del modpack. Para eliminarlos de
+                        manera sincronizada con el cliente de los jugadores, modifícalos desde{" "}
+                        <strong>Juego → Actualizaciones</strong>.
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <p style={{ margin: "0 0 16px 0", fontSize: "14px", color: tokens.textSecondary, lineHeight: 1.5 }}>
+                  {hasReleaseItems ? (
+                    isSingle
+                      ? "¿Deseas eliminar este archivo únicamente de este servidor?"
+                      : `¿Deseas eliminar los siguientes ${count} elementos únicamente de este servidor?`
+                  ) : isSingle ? (
+                    <>
+                      ¿Estás seguro de que deseas eliminar <strong>{deleteTargets[0].name}</strong> del servidor? Si es una carpeta, se eliminarán todos los archivos y subcarpetas que contiene.
+                    </>
+                  ) : (
+                    <>
+                      ¿Estás seguro de que deseas eliminar los siguientes <strong>{count}</strong> elementos del servidor? Esta acción no se puede deshacer.
+                    </>
+                  )}
+                </p>
+
+                {/* Bullet list of items to delete */}
+                <div
+                  style={{
+                    maxHeight: 160,
+                    overflowY: "auto",
+                    padding: "10px 14px",
+                    backgroundColor: tokens.bgCardInner,
+                    borderRadius: 10,
+                    border: `1px solid ${tokens.borderSubtle}`,
+                    marginBottom: 20,
+                    fontSize: "12px",
+                    fontFamily: "monospace",
+                    color: tokens.textSecondary,
+                  }}
+                  className="custom-scroll"
+                >
+                  {deleteTargets.map((file) => {
+                    const isRel = getManagedRecord(file)?.managementSource === "GAME_RELEASE"
+                    return (
+                      <div
+                        key={file.name}
+                        style={{
+                          padding: "3px 0",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
+                        }}
+                      >
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          • {file.name}
+                        </span>
+                        {isRel && (
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              padding: "1px 6px",
+                              borderRadius: 4,
+                              backgroundColor: "rgba(245, 158, 11, 0.15)",
+                              color: "#f59e0b",
+                              flexShrink: 0,
+                              fontFamily: "inherit",
+                              fontWeight: 600,
+                            }}
+                          >
+                            Actualización
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Action buttons */}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteTargets(null)}
+                    className="launcher-btn-secondary"
+                    disabled={isDeleting}
+                    style={{
+                      padding: "9px 16px",
+                      borderRadius: 10,
+                      fontSize: "13px",
+                    }}
+                  >
+                    Cancelar
+                  </button>
+
+                  {hasReleaseItems ? (
+                    <>
+                      <button
+                        type="button"
+                        data-testid="button-force-delete-from-server"
+                        onClick={handleExecuteDelete}
+                        disabled={isDeleting}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "9px 16px",
+                          borderRadius: 10,
+                          border: "none",
+                          background: "#dc2626",
+                          color: "#ffffff",
+                          cursor: isDeleting ? "not-allowed" : "pointer",
+                          fontWeight: 600,
+                          fontSize: "13px",
+                        }}
+                      >
+                        {isDeleting ? <IconSpinner size={15} /> : <IconTrash size={15} />}
+                        <span>{isDeleting ? "Eliminando..." : "Eliminar de todas formas"}</span>
+                      </button>
+
+                      {onNavigateToGame && (
+                        <button
+                          type="button"
+                          data-testid="button-navigate-game-from-delete"
+                          onClick={() => {
+                            setDeleteTargets(null)
+                            onNavigateToGame()
+                          }}
+                          className="launcher-btn-primary"
+                          disabled={isDeleting}
+                          style={{
+                            padding: "9px 16px",
+                            borderRadius: 10,
+                            fontWeight: 600,
+                            fontSize: "13px",
+                          }}
+                        >
+                          Administrar en Juego →
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleExecuteDelete}
+                      disabled={isDeleting}
+                      className="launcher-btn-danger"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "9px 18px",
+                        borderRadius: 10,
+                        fontWeight: 600,
+                        fontSize: "13px",
+                      }}
+                    >
+                      {isDeleting && <IconSpinner size={15} />}
+                      <span>{isDeleting ? "Eliminando..." : "Eliminar definitivamente"}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Text File Editor Modal */}
       {editingFile && (
