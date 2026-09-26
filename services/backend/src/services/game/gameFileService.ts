@@ -37,6 +37,7 @@ import {
   resolveReleaseEffectivePolicies,
 } from "./releaseService"
 import { generateR2TemporaryCredentials } from "../r2CredentialsService"
+import * as jose from "jose"
 import { assertExplicitServerIdIfMultiple } from "../pterodactyl/serverAdministrationService"
 
 type BatchStatements = Parameters<Database["batch"]>[0]
@@ -47,6 +48,51 @@ function asBatchTuple(statements: BatchStatement[]): BatchStatements {
     throw new Error("Batch statements cannot be empty.")
   }
   return [statements[0], ...statements.slice(1)] as unknown as BatchStatements
+}
+
+export interface GameUploadTokenPayload {
+  objectKey: string
+  expectedSizeBytes: number
+  category: GameFileCategory
+  originalFilename: string
+  serverId: string | null
+  createdBy: string
+}
+
+export async function signGameUploadToken(
+  payload: GameUploadTokenPayload,
+  env?: Env,
+): Promise<string> {
+  const secretKey = env?.R2_PARENT_SECRET_ACCESS_KEY || env?.INTERNAL_PROXY_SECRET || "hikat-game-upload-secret"
+  const secretBytes = new TextEncoder().encode(secretKey)
+
+  return new jose.SignJWT({ ...payload })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuedAt()
+    .setExpirationTime("6h")
+    .sign(secretBytes)
+}
+
+export async function verifyGameUploadToken(
+  token: string,
+  env?: Env,
+): Promise<GameUploadTokenPayload> {
+  const secretKey = env?.R2_PARENT_SECRET_ACCESS_KEY || env?.INTERNAL_PROXY_SECRET || "hikat-game-upload-secret"
+  const secretBytes = new TextEncoder().encode(secretKey)
+
+  try {
+    const { payload } = await jose.jwtVerify(token, secretBytes)
+    return {
+      objectKey: payload.objectKey as string,
+      expectedSizeBytes: payload.expectedSizeBytes as number,
+      category: payload.category as GameFileCategory,
+      originalFilename: payload.originalFilename as string,
+      serverId: (payload.serverId as string) || null,
+      createdBy: (payload.createdBy as string) || "",
+    }
+  } catch {
+    throw createGraphQLError("Token de subida no válido o expirado.", "VALIDATION_ERROR")
+  }
 }
 
 /**
@@ -482,63 +528,32 @@ export async function createGameFileBatchUploadTokens(
   const UPLOAD_TTL_MS = 6 * 60 * 60 * 1000 // 6 hours TTL
   const expiresAt = new Date(now.getTime() + UPLOAD_TTL_MS).toISOString()
 
-  const tokenRecords: Array<typeof schema.gameFileUploadTokens.$inferInsert> = []
   const payloadItems: GameFileBatchUploadItemPayloadGql[] = []
 
   for (const item of files) {
     const safeFilename = sanitizeGameFileName(item.originalFilename)
     const category = (item.category || inferGameCategory(item.logicalPath || safeFilename)) as GameFileCategory
-
-    const tokenId = crypto.randomUUID()
     const objectKey = `${prefixPath}${crypto.randomUUID()}`
 
-    const rawTokenBytes = new Uint8Array(32)
-    crypto.getRandomValues(rawTokenBytes)
-    const tokenHex = Array.from(rawTokenBytes)
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-
-    const hashBuffer = await crypto.subtle.digest("SHA-256", rawTokenBytes)
-    const tokenHash = Array.from(new Uint8Array(hashBuffer))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-
-    tokenRecords.push({
-      id: tokenId,
-      serverId: targetServerId,
-      tokenHash,
-      category,
-      originalFilename: item.logicalPath ? sanitizeGamePath(item.logicalPath) : safeFilename,
-      expectedSizeBytes: item.sizeBytes,
-      objectKey,
-      createdBy: userId,
-      expiresAt,
-      createdAt: now.toISOString(),
-    })
+    const uploadToken = await signGameUploadToken(
+      {
+        objectKey,
+        expectedSizeBytes: item.sizeBytes,
+        category,
+        originalFilename: item.logicalPath ? sanitizeGamePath(item.logicalPath) : safeFilename,
+        serverId: targetServerId,
+        createdBy: userId,
+      },
+      env,
+    )
 
     payloadItems.push({
-      uploadToken: tokenHex,
+      uploadToken,
       objectKey,
       expectedCategory: category as any,
       originalFilename: safeFilename,
       logicalPath: item.logicalPath ? sanitizeGamePath(item.logicalPath) : null,
     })
-  }
-
-  // Insert token records in multi-row batches of 8 rows (< 100 parameters) inside a single db.batch()
-  const TOKEN_CHUNK_SIZE = 8
-  const insertStatements: BatchStatement[] = []
-  for (let i = 0; i < tokenRecords.length; i += TOKEN_CHUNK_SIZE) {
-    const chunk = tokenRecords.slice(i, i + TOKEN_CHUNK_SIZE)
-    insertStatements.push(db.insert(schema.gameFileUploadTokens).values(chunk))
-  }
-
-  if (insertStatements.length > 0) {
-    const D1_BATCH_LIMIT = 80
-    for (let i = 0; i < insertStatements.length; i += D1_BATCH_LIMIT) {
-      const chunk = insertStatements.slice(i, i + D1_BATCH_LIMIT)
-      await db.batch(asBatchTuple(chunk))
-    }
   }
 
   return {
@@ -573,28 +588,27 @@ export async function completeGameFileBatchUploadTokens(
   const targetServerId = serverId || null
   await assertExplicitServerIdIfMultiple(db, targetServerId, "completar subida por lotes de archivos de juego")
 
-  // 1. Hash tokens in memory and validate syntax
-  type ItemWithHash = {
+  // 1. Validate items and verify stateless or legacy tokens
+  type ValidatedItem = {
     item: CompleteGameFileBatchUploadItemInputGql
-    tokenHash: string
+    objectKey: string
+    expectedSizeBytes: number
+    category: GameFileCategory
+    originalFilename: string
+    tokenHash?: string
   }
 
-  const itemsWithHash: ItemWithHash[] = []
-  const tokenHashMap = new Map<string, CompleteGameFileBatchUploadItemInputGql>()
+  const validatedItems: ValidatedItem[] = []
+  const legacyItemsWithHash: Array<{
+    item: CompleteGameFileBatchUploadItemInputGql
+    tokenHash: string
+  }> = []
 
   for (const item of input.items) {
     const rawToken = item.uploadToken?.trim()
     if (!rawToken) {
       throw createGraphQLError("Token de subida requerido.", "VALIDATION_ERROR")
     }
-
-    const tokenBytes = new Uint8Array(
-      rawToken.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
-    )
-    const hashBuffer = await crypto.subtle.digest("SHA-256", tokenBytes)
-    const tokenHash = Array.from(new Uint8Array(hashBuffer))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
 
     const rawSha256 = String(item.sha256 || "").trim()
     if (!/^[a-f0-9]{64}$/.test(rawSha256)) {
@@ -605,72 +619,92 @@ export async function completeGameFileBatchUploadTokens(
       throw createGraphQLError("El tamaño del archivo no puede ser negativo.", "VALIDATION_ERROR")
     }
 
-    itemsWithHash.push({ item, tokenHash })
-    tokenHashMap.set(tokenHash, item)
+    if (rawToken.startsWith("eyJ")) {
+      const payload = await verifyGameUploadToken(rawToken, env)
+      if (targetServerId && payload.serverId && payload.serverId !== targetServerId) {
+        throw createGraphQLError("El token de subida no corresponde al servidor especificado.", "VALIDATION_ERROR")
+      }
+      if (item.sizeBytes !== payload.expectedSizeBytes) {
+        throw createGraphQLError("El tamaño del archivo no coincide con el tamaño esperado.", "VALIDATION_ERROR")
+      }
+      validatedItems.push({
+        item,
+        objectKey: payload.objectKey,
+        expectedSizeBytes: payload.expectedSizeBytes,
+        category: payload.category,
+        originalFilename: payload.originalFilename,
+      })
+    } else {
+      const tokenBytes = new Uint8Array(
+        rawToken.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
+      )
+      const hashBuffer = await crypto.subtle.digest("SHA-256", tokenBytes)
+      const tokenHash = Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+      legacyItemsWithHash.push({ item, tokenHash })
+    }
   }
 
-  // 2. Fetch token records in chunks of 50 to respect SQLite parameter limits
-  const allHashes = Array.from(tokenHashMap.keys())
-  const tokenRecords: schema.GameFileUploadToken[] = []
-  const HASH_CHUNK_SIZE = 50
+  // 2. Fetch token records in chunks of 50 for legacy tokens if any
+  if (legacyItemsWithHash.length > 0) {
+    const allHashes = Array.from(new Set(legacyItemsWithHash.map((l) => l.tokenHash)))
+    const tokenRecords: schema.GameFileUploadToken[] = []
+    const HASH_CHUNK_SIZE = 50
 
-  for (let i = 0; i < allHashes.length; i += HASH_CHUNK_SIZE) {
-    const chunk = allHashes.slice(i, i + HASH_CHUNK_SIZE)
-    const rows = await db
-      .select()
-      .from(schema.gameFileUploadTokens)
-      .where(inArray(schema.gameFileUploadTokens.tokenHash, chunk))
-      .all()
-    tokenRecords.push(...rows)
-  }
-
-  const recordsByHash = new Map<string, schema.GameFileUploadToken>(
-    tokenRecords.map((r) => [r.tokenHash, r]),
-  )
-
-  // 3. In-memory validations
-  const now = new Date()
-  const validatedItems: Array<{
-    item: CompleteGameFileBatchUploadItemInputGql
-    tokenRecord: schema.GameFileUploadToken
-    tokenHash: string
-  }> = []
-
-  for (const { item, tokenHash } of itemsWithHash) {
-    const record = recordsByHash.get(tokenHash)
-    if (!record || !record.objectKey) {
-      throw createGraphQLError("Token de subida no válido o desconocido.", "VALIDATION_ERROR")
+    for (let i = 0; i < allHashes.length; i += HASH_CHUNK_SIZE) {
+      const chunk = allHashes.slice(i, i + HASH_CHUNK_SIZE)
+      const rows = await db
+        .select()
+        .from(schema.gameFileUploadTokens)
+        .where(inArray(schema.gameFileUploadTokens.tokenHash, chunk))
+        .all()
+      tokenRecords.push(...rows)
     }
 
-    if (record.usedAt) {
-      throw createGraphQLError("El token de subida ya fue utilizado por otra operación.", "CONFLICT")
-    }
+    const recordsByHash = new Map<string, schema.GameFileUploadToken>(
+      tokenRecords.map((r) => [r.tokenHash, r]),
+    )
 
-    if (new Date(record.expiresAt) < now) {
-      throw createGraphQLError("El token de subida ha expirado.", "VALIDATION_ERROR")
-    }
+    const now = new Date()
+    for (const { item, tokenHash } of legacyItemsWithHash) {
+      const record = recordsByHash.get(tokenHash)
+      if (!record || !record.objectKey) {
+        throw createGraphQLError("Token de subida no válido o desconocido.", "VALIDATION_ERROR")
+      }
+      if (record.usedAt) {
+        throw createGraphQLError("El token de subida ya fue utilizado por otra operación.", "CONFLICT")
+      }
+      if (new Date(record.expiresAt) < now) {
+        throw createGraphQLError("El token de subida ha expirado.", "VALIDATION_ERROR")
+      }
+      if (targetServerId && record.serverId && record.serverId !== targetServerId) {
+        throw createGraphQLError("El token de subida no corresponde al servidor especificado.", "VALIDATION_ERROR")
+      }
+      if (item.sizeBytes !== record.expectedSizeBytes) {
+        throw createGraphQLError("El tamaño del archivo no coincide con el tamaño esperado.", "VALIDATION_ERROR")
+      }
 
-    if (targetServerId && record.serverId && record.serverId !== targetServerId) {
-      throw createGraphQLError("El token de subida no corresponde al servidor especificado.", "VALIDATION_ERROR")
+      validatedItems.push({
+        item,
+        objectKey: record.objectKey,
+        expectedSizeBytes: record.expectedSizeBytes,
+        category: (record.category as GameFileCategory) || "GENERAL",
+        originalFilename: record.originalFilename,
+        tokenHash,
+      })
     }
-
-    if (item.sizeBytes !== record.expectedSizeBytes) {
-      throw createGraphQLError("El tamaño del archivo no coincide con el tamaño esperado.", "VALIDATION_ERROR")
-    }
-
-    validatedItems.push({ item, tokenRecord: record, tokenHash })
   }
 
   // 4. Physical R2 verification with max concurrency of 6 (HEAD and GET for magic bytes)
-  await runWithConcurrency(validatedItems, 6, async ({ item, tokenRecord }) => {
-    const objHead = await env.ASSETS!.head(tokenRecord.objectKey!)
+  await runWithConcurrency(validatedItems, 6, async ({ item, objectKey, expectedSizeBytes, originalFilename }) => {
+    const objHead = await env.ASSETS!.head(objectKey)
     if (!objHead) {
-      throw createGraphQLError(`El objeto no se encontró en el almacenamiento R2: ${tokenRecord.originalFilename}`, "VALIDATION_ERROR")
+      throw createGraphQLError(`El objeto no se encontró en el almacenamiento R2: ${originalFilename}`, "VALIDATION_ERROR")
     }
-    if (objHead.size !== tokenRecord.expectedSizeBytes || objHead.size !== item.sizeBytes) {
-      throw createGraphQLError(`El tamaño del objeto en almacenamiento no coincide con el esperado: ${tokenRecord.originalFilename}`, "VALIDATION_ERROR")
+    if (objHead.size !== expectedSizeBytes || objHead.size !== item.sizeBytes) {
+      throw createGraphQLError(`El tamaño del objeto en almacenamiento no coincide con el esperado: ${originalFilename}`, "VALIDATION_ERROR")
     }
-
   })
 
   // 5. Ensure active DRAFT release
@@ -718,20 +752,20 @@ export async function completeGameFileBatchUploadTokens(
     sizeBytes: number
     explicitPolicy: SyncPolicyGql | null
     objectKey: string
-    tokenHash: string
+    tokenHash?: string
     existingRecord?: schema.GameReleaseFile
   }
 
   const preparedItems: PreparedBatchItem[] = []
   const batchPathSet = new Set<string>()
 
-  for (const { item, tokenRecord, tokenHash } of validatedItems) {
-    const name = String(item.name || tokenRecord.originalFilename || "").trim()
+  for (const { item, objectKey, category: tokenCategory, originalFilename, tokenHash } of validatedItems) {
+    const name = String(item.name || originalFilename || "").trim()
     if (!name) {
       throw createGraphQLError("El nombre del archivo o mod es obligatorio.", "VALIDATION_ERROR")
     }
 
-    let category: GameFileCategory = (item.category as GameFileCategory) || (tokenRecord.category as GameFileCategory) || "GENERAL"
+    let category: GameFileCategory = (item.category as GameFileCategory) || (tokenCategory as GameFileCategory) || "GENERAL"
 
     const defaultDir =
       category === "CONFIG"
@@ -752,13 +786,13 @@ export async function completeGameFileBatchUploadTokens(
 
     const logicalPath = item.logicalPath
       ? sanitizeGamePath(item.logicalPath)
-      : tokenRecord.originalFilename && tokenRecord.originalFilename.includes("/")
-      ? sanitizeGamePath(tokenRecord.originalFilename)
-      : tokenRecord.originalFilename
-      ? sanitizeGamePath(defaultDir ? `${defaultDir}/${sanitizeGameFileName(tokenRecord.originalFilename)}` : sanitizeGameFileName(tokenRecord.originalFilename))
+      : originalFilename && originalFilename.includes("/")
+      ? sanitizeGamePath(originalFilename)
+      : originalFilename
+      ? sanitizeGamePath(defaultDir ? `${defaultDir}/${sanitizeGameFileName(originalFilename)}` : sanitizeGameFileName(originalFilename))
       : sanitizeGamePath(defaultDir ? `${defaultDir}/${sanitizeGameFileName(name)}` : sanitizeGameFileName(name))
 
-    if (!item.category && !tokenRecord.category) {
+    if (!item.category && !tokenCategory) {
       category = inferGameCategory(logicalPath)
     }
 
@@ -779,7 +813,7 @@ export async function completeGameFileBatchUploadTokens(
       sha256: String(item.sha256).trim(),
       sizeBytes: item.sizeBytes,
       explicitPolicy: item.explicitPolicy || null,
-      objectKey: tokenRecord.objectKey!,
+      objectKey,
       tokenHash,
       existingRecord,
     })
@@ -807,35 +841,38 @@ export async function completeGameFileBatchUploadTokens(
 
   const statements: BatchStatement[] = []
 
-  // 7a. UPDATE tokens marked as used (grouped with SQL CASE in chunks of 15 tokens)
-  const TOKEN_UPDATE_CHUNK_SIZE = 15
-  for (let i = 0; i < preparedItems.length; i += TOKEN_UPDATE_CHUNK_SIZE) {
-    const chunk = preparedItems.slice(i, i + TOKEN_UPDATE_CHUNK_SIZE)
-    const hashes = chunk.map((c) => c.tokenHash)
-    const shaCases = sql.join(
-      chunk.map((c) => sql`WHEN ${schema.gameFileUploadTokens.tokenHash} = ${c.tokenHash} THEN ${c.sha256}`),
-      sql` `,
-    )
-    const sizeCases = sql.join(
-      chunk.map((c) => sql`WHEN ${schema.gameFileUploadTokens.tokenHash} = ${c.tokenHash} THEN ${c.sizeBytes}`),
-      sql` `,
-    )
+  // 7a. UPDATE legacy tokens marked as used (if any legacy tokens were used)
+  const legacyToUpdate = preparedItems.filter((p): p is PreparedBatchItem & { tokenHash: string } => Boolean(p.tokenHash))
+  if (legacyToUpdate.length > 0) {
+    const TOKEN_UPDATE_CHUNK_SIZE = 15
+    for (let i = 0; i < legacyToUpdate.length; i += TOKEN_UPDATE_CHUNK_SIZE) {
+      const chunk = legacyToUpdate.slice(i, i + TOKEN_UPDATE_CHUNK_SIZE)
+      const hashes = chunk.map((c) => c.tokenHash)
+      const shaCases = sql.join(
+        chunk.map((c) => sql`WHEN ${schema.gameFileUploadTokens.tokenHash} = ${c.tokenHash} THEN ${c.sha256}`),
+        sql` `,
+      )
+      const sizeCases = sql.join(
+        chunk.map((c) => sql`WHEN ${schema.gameFileUploadTokens.tokenHash} = ${c.tokenHash} THEN ${c.sizeBytes}`),
+        sql` `,
+      )
 
-    statements.push(
-      db
-        .update(schema.gameFileUploadTokens)
-        .set({
-          usedAt: nowIso,
-          sha256: sql`CASE ${shaCases} ELSE ${schema.gameFileUploadTokens.sha256} END`,
-          uploadedSizeBytes: sql`CASE ${sizeCases} ELSE ${schema.gameFileUploadTokens.uploadedSizeBytes} END`,
-        })
-        .where(
-          and(
-            inArray(schema.gameFileUploadTokens.tokenHash, hashes),
-            sql`${schema.gameFileUploadTokens.usedAt} IS NULL`,
+      statements.push(
+        db
+          .update(schema.gameFileUploadTokens)
+          .set({
+            usedAt: nowIso,
+            sha256: sql`CASE ${shaCases} ELSE ${schema.gameFileUploadTokens.sha256} END`,
+            uploadedSizeBytes: sql`CASE ${sizeCases} ELSE ${schema.gameFileUploadTokens.uploadedSizeBytes} END`,
+          })
+          .where(
+            and(
+              inArray(schema.gameFileUploadTokens.tokenHash, hashes),
+              sql`${schema.gameFileUploadTokens.usedAt} IS NULL`,
+            ),
           ),
-        ),
-    )
+      )
+    }
   }
 
   // 7b. Multi-row INSERTs for new files in chunks of 5 rows (5 * 16 = 80 params < 100)

@@ -1714,9 +1714,9 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       const jwtPayload = JSON.parse(atob(rawJwt.split(".")[1]!))
       expect(jwtPayload.paths.prefixPaths).toContain(res.prefixPath)
 
-      // Verify tokens are stored in D1
+      // Verify tokens are stateless JWTs and NOT stored in D1 (0 writes to D1)
       const tokensInDb = await db.select().from(schema.gameFileUploadTokens).all()
-      expect(tokensInDb.length).toBe(2)
+      expect(tokensInDb.length).toBe(0)
     })
 
     it("completes batch upload successfully with multi-row inserts and single atomic db.batch", async () => {
@@ -1757,9 +1757,64 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       const filesInDb = await db.select().from(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.releaseId, draft.id)).all()
       expect(filesInDb.length).toBe(2)
 
-      // Verify tokens marked USED in D1
+      // Verify no upload token rows are touched or created in D1 for stateless tokens
       const tokensInDb = await db.select().from(schema.gameFileUploadTokens).all()
-      expect(tokensInDb.every(t => t.usedAt !== null)).toBe(true)
+      expect(tokensInDb.length).toBe(0)
+    })
+
+    it("completes batch upload successfully with legacy database tokens", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      const legacyToken = "a".repeat(64)
+      const tokenBytes = new Uint8Array(
+        legacyToken.match(/.{1,2}/g)!.map((byte) => parseInt(byte, 16)),
+      )
+      const hashBuffer = await crypto.subtle.digest("SHA-256", tokenBytes)
+      const tokenHash = Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+
+      const objectKey = "game-files/batches/legacy/file.jar"
+      await db.insert(schema.gameFileUploadTokens).values({
+        id: crypto.randomUUID(),
+        tokenHash,
+        objectKey,
+        expectedSizeBytes: 20,
+        category: "MOD",
+        originalFilename: "legacy.jar",
+        createdBy: adminId,
+        serverId: null,
+        expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        usedAt: null,
+        sha256: null,
+        uploadedSizeBytes: null,
+        createdAt: new Date().toISOString(),
+      })
+
+      const jar = new Uint8Array([0x50, 0x4b, 0x03, 0x04, ...new Uint8Array(16)])
+      await mockR2.put(objectKey, jar)
+
+      const validSha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      const completed = await completeGameFileBatchUploadTokens(
+        db,
+        {
+          items: [
+            { uploadToken: legacyToken, sha256: validSha, sizeBytes: 20, name: "legacy.jar" },
+          ],
+        },
+        adminId,
+        env,
+      )
+
+      expect(completed.length).toBe(1)
+      expect(completed[0]!.name).toBe("legacy.jar")
+
+      // Verify legacy token marked as used in D1
+      const updatedToken = await db
+        .select()
+        .from(schema.gameFileUploadTokens)
+        .where(eq(schema.gameFileUploadTokens.tokenHash, tokenHash))
+        .get()
+      expect(updatedToken?.usedAt).not.toBeNull()
     })
 
     it("rejects batch if any file fails R2 verification or is invalid", async () => {
