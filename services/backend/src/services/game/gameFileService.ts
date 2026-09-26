@@ -27,7 +27,6 @@ import {
   isUtf8TextBuffer,
   validateJsonContent,
   validateGameTreeInvariants,
-  validateGameFileHeader,
   KNOWN_BINARY_EXTENSIONS,
   type GameFileCategory,
 } from "@hikat/shared"
@@ -226,9 +225,9 @@ export async function createGameFileUploadToken(
   const safeFilename = sanitizeGameFileName(input.originalFilename)
   const category = (input.category || inferGameCategory(input.logicalPath || safeFilename)) as GameFileCategory
 
-  if (input.sizeBytes <= 0) {
+  if (input.sizeBytes < 0) {
     throw createGraphQLError(
-      "El tamaño del archivo debe ser mayor a 0 bytes.",
+      "El tamaño del archivo no puede ser negativo.",
       "VALIDATION_ERROR",
     )
   }
@@ -382,20 +381,7 @@ export async function completeGameFileUploadToken(
     throw createGraphQLError("El tamaño del objeto en almacenamiento no coincide con el esperado.", "VALIDATION_ERROR")
   }
 
-  const category = tokenRecord.category as GameFileCategory
-  if (category === "MOD" || category === "DATA_PACK" || category === "RESOURCE_PACK" || category === "SHADER_PACK") {
-    const headerObj = await env.ASSETS.get(tokenRecord.objectKey, {
-      range: { offset: 0, length: 4 },
-    })
-    if (!headerObj || !headerObj.body) {
-      throw createGraphQLError("No se pudo verificar la cabecera del archivo en almacenamiento.", "INTERNAL_ERROR")
-    }
-    const headerBytes = new Uint8Array(await headerObj.arrayBuffer())
-    const validation = validateGameFileHeader(headerBytes, tokenRecord.originalFilename, category)
-    if (!validation.valid) {
-      throw createGraphQLError(validation.error || "Formato de archivo inválido.", "VALIDATION_ERROR")
-    }
-  }
+
 
   const updated = await db
     .update(schema.gameFileUploadTokens)
@@ -465,9 +451,9 @@ export async function createGameFileBatchUploadTokens(
   await assertExplicitServerIdIfMultiple(db, targetServerId, "subida por lotes de archivos de juego")
 
   for (const item of files) {
-    if (item.sizeBytes <= 0) {
+    if (item.sizeBytes < 0) {
       throw createGraphQLError(
-        "El tamaño del archivo debe ser mayor a 0 bytes.",
+        "El tamaño del archivo no puede ser negativo.",
         "VALIDATION_ERROR",
       )
     }
@@ -611,8 +597,8 @@ export async function completeGameFileBatchUploadTokens(
       throw createGraphQLError("Formato de hash SHA-256 no válido.", "VALIDATION_ERROR")
     }
 
-    if (item.sizeBytes <= 0) {
-      throw createGraphQLError("El tamaño del archivo debe ser mayor a 0 bytes.", "VALIDATION_ERROR")
+    if (item.sizeBytes < 0) {
+      throw createGraphQLError("El tamaño del archivo no puede ser negativo.", "VALIDATION_ERROR")
     }
 
     itemsWithHash.push({ item, tokenHash })
@@ -681,20 +667,6 @@ export async function completeGameFileBatchUploadTokens(
       throw createGraphQLError(`El tamaño del objeto en almacenamiento no coincide con el esperado: ${tokenRecord.originalFilename}`, "VALIDATION_ERROR")
     }
 
-    const category = tokenRecord.category as GameFileCategory
-    if (category === "MOD" || category === "DATA_PACK" || category === "RESOURCE_PACK" || category === "SHADER_PACK") {
-      const headerObj = await env.ASSETS!.get(tokenRecord.objectKey!, {
-        range: { offset: 0, length: 4 },
-      })
-      if (!headerObj || !headerObj.body) {
-        throw createGraphQLError(`No se pudo verificar la cabecera del archivo en almacenamiento: ${tokenRecord.originalFilename}`, "INTERNAL_ERROR")
-      }
-      const headerBytes = new Uint8Array(await headerObj.arrayBuffer())
-      const validation = validateGameFileHeader(headerBytes, tokenRecord.originalFilename, category)
-      if (!validation.valid) {
-        throw createGraphQLError(validation.error || `Formato de archivo inválido: ${tokenRecord.originalFilename}`, "VALIDATION_ERROR")
-      }
-    }
   })
 
   // 5. Ensure active DRAFT release

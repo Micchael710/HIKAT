@@ -1584,15 +1584,15 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       expect(ticket.endpoint).toBe("https://cf-test-account-id.r2.cloudflarestorage.com")
     })
 
-    it("rejects invalid size <= 0 or exceeding practical multipart max", async () => {
+    it("rejects invalid size < 0 or exceeding practical multipart max", async () => {
       await expect(
         createGameFileUploadToken(
           db,
-          { originalFilename: "zero.jar", sizeBytes: 0, category: "MOD" },
+          { originalFilename: "negative.jar", sizeBytes: -1, category: "MOD" },
           adminId,
           env,
         ),
-      ).rejects.toThrow(/mayor a 0/i)
+      ).rejects.toThrow(/no puede ser negativo/i)
 
       await expect(
         createGameFileUploadToken(
@@ -1636,10 +1636,10 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       ).rejects.toThrow(/formato de hash sha-256 no válido/i)
     })
 
-    it("completeGameFileUploadToken verifies R2 object size and magic bytes for MOD", async () => {
+    it("completeGameFileUploadToken verifies R2 object size and accepts arbitrary format", async () => {
       const ticket = await createGameFileUploadToken(
         db,
-        { originalFilename: "corrupt.jar", sizeBytes: 10, category: "MOD" },
+        { originalFilename: "readme.txt", sizeBytes: 10, category: "MOD" },
         adminId,
         env,
       )
@@ -1655,30 +1655,34 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
           },
           env,
         ),
-      ).rejects.toThrow(/no se encontró en el almacenamiento r2/i)
+      ).rejects.toThrow(/no se encontr/i)
 
-      // 2. If object exists but non-zip header
+      // 2. If object exists and is non-zip, it is accepted without rejection
       await mockR2.put(ticket.objectKey, new Uint8Array([0x00, 0x00, 0x00, 0x00, 1, 2, 3, 4, 5, 6]))
-      await expect(
-        completeGameFileUploadToken(
-          db,
-          {
-            uploadToken: ticket.uploadToken,
-            sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-            sizeBytes: 10,
-          },
-          env,
-        ),
-      ).rejects.toThrow(/no es un archivo \.jar o \.zip válido/i)
+      const completed = await completeGameFileUploadToken(
+        db,
+        {
+          uploadToken: ticket.uploadToken,
+          sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          sizeBytes: 10,
+        },
+        env,
+      )
+      expect(completed.sizeBytes).toBe(10)
 
       // 3. If size does not match expected size
-      const validZipContent = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4])
-      await mockR2.put(ticket.objectKey, validZipContent)
+      const ticket2 = await createGameFileUploadToken(
+        db,
+        { originalFilename: "size-mismatch.jar", sizeBytes: 10, category: "MOD" },
+        adminId,
+        env,
+      )
+      await mockR2.put(ticket2.objectKey, new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]))
       await expect(
         completeGameFileUploadToken(
           db,
           {
-            uploadToken: ticket.uploadToken,
+            uploadToken: ticket2.uploadToken,
             sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             sizeBytes: 8,
           },
@@ -1792,6 +1796,52 @@ describe("HiKAT Shard 8A: Game Files Explorer Backend Suite & Hardening", () => 
       // Verify atomic rollback / no files committed
       const filesInDb = await db.select().from(schema.gameReleaseFiles).where(eq(schema.gameReleaseFiles.releaseId, draft.id)).all()
       expect(filesInDb.length).toBe(0)
+    })
+
+    it("allows uploading 0-byte files and non-jar arbitrary files in mods/ directory", async () => {
+      const draft = await prepareGameDraft(db, adminId)
+      const res = await createGameFileBatchUploadTokens(
+        db,
+        [
+          { originalFilename: "empty.txt", logicalPath: "mods/empty.txt", sizeBytes: 0, category: "MOD" },
+          { originalFilename: "readme.md", logicalPath: "mods/readme.md", sizeBytes: 15, category: "MOD" },
+        ],
+        adminId,
+        env,
+      )
+
+      expect(res.items.length).toBe(2)
+
+      // Store in mock R2: empty file (0 bytes) and text file (15 bytes)
+      await mockR2.put(res.items[0]!.objectKey, new Uint8Array([]))
+      await mockR2.put(res.items[1]!.objectKey, new TextEncoder().encode("Hello Minecraft"))
+
+      const emptySha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      const textSha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+      const completed = await completeGameFileBatchUploadTokens(
+        db,
+        {
+          items: [
+            { uploadToken: res.items[0]!.uploadToken, sha256: emptySha, sizeBytes: 0, name: "empty.txt", logicalPath: "mods/empty.txt" },
+            { uploadToken: res.items[1]!.uploadToken, sha256: textSha, sizeBytes: 15, name: "readme.md", logicalPath: "mods/readme.md" },
+          ],
+        },
+        adminId,
+        env,
+      )
+
+      expect(completed.length).toBe(2)
+      const emptyRecord = completed.find(f => f.name === "empty.txt")
+      const textRecord = completed.find(f => f.name === "readme.md")
+
+      expect(emptyRecord?.sizeBytes).toBe(0)
+      expect(emptyRecord?.logicalPath).toBe("mods/empty.txt")
+      expect(emptyRecord?.policy).toBe("NO_MODIFICABLE")
+
+      expect(textRecord?.sizeBytes).toBe(15)
+      expect(textRecord?.logicalPath).toBe("mods/readme.md")
+      expect(textRecord?.policy).toBe("NO_MODIFICABLE")
     })
   })
 })

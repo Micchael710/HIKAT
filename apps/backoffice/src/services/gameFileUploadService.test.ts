@@ -19,9 +19,9 @@ describe("gameFileUploadService", () => {
     expect(sha).toMatch(/^[a-f0-9]{64}$/)
   })
 
-  it("validates header bytes for MOD (.jar) and rejects non-zip magic bytes", async () => {
+  it("allows non-zip files and arbitrary files in MOD category without magic byte rejection", async () => {
     const invalidContent = new Uint8Array([0x00, 0x00, 0x00, 0x00])
-    const file = new File([invalidContent], "invalid.jar", { type: "application/java-archive" })
+    const file = new File([invalidContent], "readme.txt", { type: "text/plain" })
 
     const ticket: any = {
       expectedCategory: "MOD",
@@ -31,9 +31,27 @@ describe("gameFileUploadService", () => {
       credentials: { accessKeyId: "k", secretAccessKey: "s", sessionToken: "t" },
     }
 
-    await expect(uploadGameFileDirect(file, ticket)).rejects.toThrow(
-      "El archivo no es un archivo .jar o .zip válido.",
-    )
+    const result = await uploadGameFileDirect(file, ticket)
+    expect(result.sizeBytes).toBe(4)
+    expect(result.sha256).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it("calculates incremental SHA-256 and uploads 0-byte file without error", async () => {
+    const emptyFile = new File([], "empty.txt", { type: "text/plain" })
+    const sha = await calculateFileSha256(emptyFile)
+    expect(sha).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+
+    const ticket: any = {
+      expectedCategory: "GENERAL",
+      endpoint: "https://r2.test",
+      bucket: "hikat-r2",
+      objectKey: "game-files/empty",
+      credentials: { accessKeyId: "k", secretAccessKey: "s", sessionToken: "t" },
+    }
+
+    const result = await uploadGameFileDirect(emptyFile, ticket)
+    expect(result.sizeBytes).toBe(0)
+    expect(result.sha256).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
   })
 
   it("allows GENERAL category without zip magic byte enforcement", async () => {

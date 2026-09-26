@@ -1,7 +1,7 @@
 import { S3Client } from "@aws-sdk/client-s3"
 import { Upload } from "@aws-sdk/lib-storage"
 import { createSHA256 } from "hash-wasm"
-import { validateGameFileHeader, type GameFileCategory } from "@hikat/shared"
+import type { GameFileCategory } from "@hikat/shared"
 import type { GameFileUploadPayloadGql } from "@hikat/graphql"
 
 /**
@@ -78,20 +78,7 @@ export async function uploadGameFileDirect(
 ): Promise<{ sha256: string; sizeBytes: number }> {
   const category = ticket.expectedCategory as GameFileCategory
 
-  // 1. Validate magic bytes / header for category before starting upload
-  if (
-    category === "MOD" ||
-    category === "DATA_PACK" ||
-    category === "RESOURCE_PACK" ||
-    category === "SHADER_PACK"
-  ) {
-    const headerSlice = file.slice(0, 4)
-    const headerBuffer = await headerSlice.arrayBuffer()
-    const validation = validateGameFileHeader(new Uint8Array(headerBuffer), file.name, category)
-    if (!validation.valid) {
-      throw new Error(validation.error || "Formato de archivo inválido.")
-    }
-  }
+
 
   // 2. Compute incremental SHA-256 hash
   const sha256 = await calculateFileSha256(file)
@@ -177,21 +164,7 @@ export async function uploadGameFilesBatch(
         currentFilename: item.file.name,
       })
 
-      // 1. Validate magic bytes / header for category
-      const category = item.expectedCategory
-      if (
-        category === "MOD" ||
-        category === "DATA_PACK" ||
-        category === "RESOURCE_PACK" ||
-        category === "SHADER_PACK"
-      ) {
-        const headerSlice = item.file.slice(0, 4)
-        const headerBuffer = await headerSlice.arrayBuffer()
-        const validation = validateGameFileHeader(new Uint8Array(headerBuffer), item.file.name, category)
-        if (!validation.valid) {
-          throw new Error(validation.error || `Formato de archivo inválido en "${item.file.name}".`)
-        }
-      }
+
 
       // 2. Incremental SHA-256
       const sha256 = await calculateFileSha256(item.file)
