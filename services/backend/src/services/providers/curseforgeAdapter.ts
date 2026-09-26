@@ -77,6 +77,47 @@ export function extractCurseForgeEnvironment(file?: {
   return null
 }
 
+/**
+ * Resolves the overall project environment from CurseForge latestFiles.
+ * Aggregates client and server environment flags across files without stopping prematurely.
+ */
+export function extractCurseForgeProjectEnvironment(
+  latestFiles?: Array<any> | null,
+  mainFileId?: number | null,
+): ModEnvironmentGql | null {
+  if (!Array.isArray(latestFiles) || latestFiles.length === 0) return null
+
+  // Fast-path: if mainFileId is present and marked as BOTH, resolve immediately
+  if (mainFileId) {
+    const mainFile = latestFiles.find((f) => f && f.id === mainFileId)
+    if (mainFile) {
+      const mainEnv = extractCurseForgeEnvironment(mainFile)
+      if (mainEnv === "BOTH") return "BOTH"
+    }
+  }
+
+  let hasClient = false
+  let hasServer = false
+
+  for (const f of latestFiles) {
+    const env = extractCurseForgeEnvironment(f)
+    if (env === "BOTH") {
+      return "BOTH"
+    }
+    if (env === "CLIENT") hasClient = true
+    if (env === "SERVER") hasServer = true
+
+    if (hasClient && hasServer) {
+      return "BOTH"
+    }
+  }
+
+  if (hasClient && hasServer) return "BOTH"
+  if (hasClient) return "CLIENT"
+  if (hasServer) return "SERVER"
+  return null
+}
+
 export class CurseForgeAdapter implements ModProviderAdapter {
   readonly provider = "CURSEFORGE" as const
   private classIdCache: Map<ContentTypeGql, number> | null = null
@@ -252,6 +293,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
           dateModified?: string
           classId?: number
           latestFiles?: Array<any>
+          mainFileId?: number
         }>
         pagination?: { totalCount?: number }
       }
@@ -259,13 +301,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
       const items: NormalizedModProject[] = (data.data || []).map((mod) => {
         let projectEnv: ModEnvironmentGql | null = null
         if (contentType === "MOD" && Array.isArray(mod.latestFiles)) {
-          for (const f of mod.latestFiles) {
-            const extracted = extractCurseForgeEnvironment(f)
-            if (extracted) {
-              projectEnv = extracted
-              break
-            }
-          }
+          projectEnv = extractCurseForgeProjectEnvironment(mod.latestFiles, mod.mainFileId)
         }
 
         return {
@@ -336,6 +372,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
           classId?: number
           mainCategoryId?: number
           latestFiles?: Array<any>
+          mainFileId?: number
         }
       }
 
@@ -355,13 +392,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
 
       let projectEnv: ModEnvironmentGql | null = null
       if (discoveredType === "MOD" && Array.isArray(mod.latestFiles)) {
-        for (const f of mod.latestFiles) {
-          const extracted = extractCurseForgeEnvironment(f)
-          if (extracted) {
-            projectEnv = extracted
-            break
-          }
-        }
+        projectEnv = extractCurseForgeProjectEnvironment(mod.latestFiles, mod.mainFileId)
       }
 
       return {
@@ -780,13 +811,7 @@ export class CurseForgeAdapter implements ModProviderAdapter {
               const projectId = String(match.file.modId || match.id || "")
               let envVal = extractCurseForgeEnvironment(match.file)
               if (!envVal && Array.isArray(match.latestFiles)) {
-                for (const lf of match.latestFiles) {
-                  const extracted = extractCurseForgeEnvironment(lf)
-                  if (extracted) {
-                    envVal = extracted
-                    break
-                  }
-                }
+                envVal = extractCurseForgeProjectEnvironment(match.latestFiles)
               }
 
               resultMap.set(Number(targetFp), {

@@ -4,7 +4,7 @@ import { createTestD1 } from "@hikat/database/testUtils"
 import { eq } from "drizzle-orm"
 import type { Env } from "../../types"
 import { ModrinthAdapter } from "./modrinthAdapter"
-import { CurseForgeAdapter } from "./curseforgeAdapter"
+import { CurseForgeAdapter, extractCurseForgeProjectEnvironment } from "./curseforgeAdapter"
 import { ModProviderManager, modProviderManager, getLogicalPathForContent } from "./modProviderManager"
 import { installModPlan, installModPlansBatch, PROVIDER_MIN_PART_SIZE_BYTES, runWithConcurrency } from "./modInstallationService"
 import { prepareGameDraft, getPublishedModpack, publishGameRelease } from "../game/releaseService"
@@ -976,6 +976,80 @@ describe("Shard 8B — Content Providers & Dependency Resolution Suite", () => {
       })
       const vUntagged = await adapter.getVersion(env, "104", "908741", "MOD")
       expect(vUntagged?.environment).toBeNull()
+    })
+
+    it("aggregates project environment across CurseForge latestFiles avoiding premature loop termination (JourneyMap case)", async () => {
+      const adapter = new CurseForgeAdapter()
+
+      const journeyMapLatestFiles = [
+        { id: 1, fileName: "legacy.jar", gameVersions: ["1.12.2"] }, // untagged
+        { id: 2, fileName: "server-plugin.jar", gameVersions: ["Server", "26.1.2"] }, // Server only
+        { id: 3, fileName: "neoforge-client-server.jar", gameVersions: ["Client", "Server", "NeoForge", "1.21.1"] }, // Both
+      ]
+
+      // 1. Direct unit test of helper
+      expect(extractCurseForgeProjectEnvironment(journeyMapLatestFiles, 3)).toBe("BOTH")
+      expect(extractCurseForgeProjectEnvironment(journeyMapLatestFiles.slice(0, 2))).toBe("SERVER")
+      expect(extractCurseForgeProjectEnvironment([{ id: 1, gameVersions: ["Client"] }])).toBe("CLIENT")
+      expect(extractCurseForgeProjectEnvironment([])).toBeNull()
+
+      // 2. Integration with searchMods and getProject
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url)
+        if (u.includes("/categories?gameId=432&classesOnly=true")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [{ id: 6, name: "Mods", slug: "mc-mods" }],
+            }),
+          }
+        }
+        if (u.includes("/mods/search")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [
+                {
+                  id: 32274,
+                  name: "JourneyMap",
+                  slug: "journeymap",
+                  summary: "Real-time map",
+                  classId: 6,
+                  mainFileId: 3,
+                  latestFiles: journeyMapLatestFiles,
+                },
+              ],
+              pagination: { totalCount: 1 },
+            }),
+          }
+        }
+        if (u.includes("/mods/32274")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: {
+                id: 32274,
+                name: "JourneyMap",
+                slug: "journeymap",
+                summary: "Real-time map",
+                classId: 6,
+                mainFileId: 3,
+                latestFiles: journeyMapLatestFiles,
+              },
+            }),
+          }
+        }
+        return { ok: false, status: 404 }
+      })
+
+      const searchRes = await adapter.searchMods(env, "journeymap", "1.21.1", "NEOFORGE", 10, 0, "MOD")
+      expect(searchRes.items[0]?.environment).toBe("BOTH")
+
+      const projectRes = await adapter.getProject(env, "32274")
+      expect(projectRes?.environment).toBe("BOTH")
     })
 
     it("fails closed on unknown CurseForge classId (does not return MOD or accept spoofing)", async () => {
