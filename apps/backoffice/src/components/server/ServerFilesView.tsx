@@ -1618,7 +1618,7 @@ export default function ServerFilesView({
             <div
               style={{
                 width: "100%",
-                maxWidth: 480,
+                maxWidth: 540,
                 backgroundColor: tokens.bgCard,
                 borderRadius: 18,
                 border: `1px solid ${tokens.borderSubtle}`,
@@ -1773,87 +1773,76 @@ export default function ServerFilesView({
                 </div>
 
                 {/* Action buttons */}
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteTargets(null)}
-                    className="launcher-btn-secondary"
-                    disabled={isDeleting}
-                    style={{
-                      padding: "9px 16px",
-                      borderRadius: 10,
-                      fontSize: "13px",
-                    }}
-                  >
-                    Cancelar
-                  </button>
-
-                  {hasReleaseItems ? (
-                    <>
-                      <button
-                        type="button"
-                        data-testid="button-force-delete-from-server"
-                        onClick={handleExecuteDelete}
-                        disabled={isDeleting}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 6,
-                          padding: "9px 16px",
-                          borderRadius: 10,
-                          border: "none",
-                          background: "#dc2626",
-                          color: "#ffffff",
-                          cursor: isDeleting ? "not-allowed" : "pointer",
-                          fontWeight: 600,
-                          fontSize: "13px",
-                        }}
-                      >
-                        {isDeleting ? <IconSpinner size={15} /> : <IconTrash size={15} />}
-                        <span>{isDeleting ? "Eliminando..." : "Eliminar de todas formas"}</span>
-                      </button>
-
-                      {onNavigateToGame && (
-                        <button
-                          type="button"
-                          data-testid="button-navigate-game-from-delete"
-                          onClick={() => {
-                            setDeleteTargets(null)
-                            onNavigateToGame()
-                          }}
-                          className="launcher-btn-primary"
-                          disabled={isDeleting}
-                          style={{
-                            padding: "9px 16px",
-                            borderRadius: 10,
-                            fontWeight: 600,
-                            fontSize: "13px",
-                          }}
-                        >
-                          Administrar en Juego →
-                        </button>
-                      )}
-                    </>
-                  ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: hasReleaseItems && onNavigateToGame ? "space-between" : "flex-end",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {hasReleaseItems && onNavigateToGame && (
                     <button
                       type="button"
+                      data-testid="button-navigate-game-from-delete"
+                      onClick={() => {
+                        setDeleteTargets(null)
+                        onNavigateToGame()
+                      }}
+                      className="launcher-btn-primary"
+                      disabled={isDeleting}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "10px 18px",
+                        borderRadius: "12px",
+                        fontWeight: 600,
+                        fontSize: "14px",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Administrar en Juego →
+                    </button>
+                  )}
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: hasReleaseItems && onNavigateToGame ? "auto" : undefined }}>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteTargets(null)}
+                      className="launcher-btn-secondary"
+                      disabled={isDeleting}
+                      style={{
+                        padding: "10px 18px",
+                        borderRadius: "12px",
+                        fontSize: "14px",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Cancelar
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="button-force-delete-from-server"
                       onClick={handleExecuteDelete}
                       disabled={isDeleting}
                       className="launcher-btn-danger"
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
-                        gap: 8,
-                        padding: "9px 18px",
-                        borderRadius: 10,
-                        fontWeight: 600,
-                        fontSize: "13px",
+                        gap: "8px",
+                        padding: "10px 20px",
+                        borderRadius: "12px",
+                        fontSize: "14px",
+                        whiteSpace: "nowrap",
                       }}
                     >
-                      {isDeleting && <IconSpinner size={15} />}
-                      <span>{isDeleting ? "Eliminando..." : "Eliminar definitivamente"}</span>
+                      {isDeleting && <IconSpinner size={16} />}
+                      <span>{hasReleaseItems ? "Eliminar de todas formas" : "Eliminar definitivamente"}</span>
                     </button>
-                  )}
+                  </div>
                 </div>
               </div>
             </div>
