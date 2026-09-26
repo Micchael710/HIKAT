@@ -81,8 +81,8 @@ describe("Shard 08D: Server File Explorer Managed Content Protections Tests", ()
     expect(renameSpy).not.toHaveBeenCalled()
   })
 
-  // Test 2: Delete is blocked on GAME_RELEASE content
-  it("deleteServerFile blocks manual deletion of GAME_RELEASE content", async () => {
+  // Test 2: Delete on GAME_RELEASE content deletes physical file and cascades D1 record
+  it("deleteServerFile deletes physical file and cascades D1 record for GAME_RELEASE content", async () => {
     const nowIso = new Date().toISOString()
 
     await db.insert(schema.serverManagedContent).values({
@@ -97,14 +97,16 @@ describe("Shard 08D: Server File Explorer Managed Content Protections Tests", ()
       updatedAt: nowIso,
     })
 
-    const deleteFilesSpy = vi.fn()
+    const deleteFilesSpy = vi.fn().mockResolvedValue(undefined)
     const mockClient = { deleteFiles: deleteFilesSpy }
 
-    await expect(
-      deleteServerFile(env, "SERVER", "mods/release-mod.jar", mockClient as any, db),
-    ).rejects.toThrow("Este archivo pertenece a la release del modpack. Modifícalo desde Juego → Actualizaciones.")
+    const success = await deleteServerFile(env, "SERVER", "mods/release-mod.jar", mockClient as any, db)
+    expect(success).toBe(true)
+    expect(deleteFilesSpy).toHaveBeenCalledWith("/mods", ["release-mod.jar"])
 
-    expect(deleteFilesSpy).not.toHaveBeenCalled()
+    // Record removed from D1
+    const records = await db.select().from(schema.serverManagedContent)
+    expect(records).toHaveLength(0)
   })
 
   // Test 3: Delete on SERVER_DIRECT cascades D1 record deletion

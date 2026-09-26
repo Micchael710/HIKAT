@@ -457,14 +457,7 @@ export async function deleteServerFile(
     )
 
     if (match) {
-      if (match.managementSource === "GAME_RELEASE") {
-        throw new ServerInfrastructureError(
-          SERVER_ERROR_CODES.SERVER_UNAVAILABLE,
-          "Este archivo pertenece a la release del modpack. Modifícalo desde Juego → Actualizaciones.",
-        )
-      }
-
-      // If SERVER_DIRECT: proceed with safe physical deletion and cascade remove D1 record only on success
+      // Proceed with safe physical deletion and cascade remove D1 record only on success
       await safeDeleteServerFilePhysical(client, parentPath, fileName)
       await db
         .delete(schema.serverManagedContent)
