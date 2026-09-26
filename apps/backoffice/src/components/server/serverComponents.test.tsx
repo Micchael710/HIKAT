@@ -840,6 +840,73 @@ describe("Shard 08D: ServerFilesView & Server Content Sync Frontend Tests", () =
     expect(screen.getByText("Servidor")).toBeDefined()
   })
 
+  it("Shard 08D Test 1b: ServerFilesView allows force deleting a GAME_RELEASE file with 'Eliminar de todas formas'", async () => {
+    const deleteSpy = vi.spyOn(serverApi, "deleteServerFile").mockResolvedValue({ success: true } as any)
+    vi.spyOn(serverApi, "getServerFiles").mockResolvedValue([
+      { name: "ferritecore.jar", isFile: true, isSymlink: false, sizeBytes: 1000, modifiedAt: new Date().toISOString() },
+    ])
+    vi.spyOn(serverContentApi, "getServerManagedContent").mockResolvedValue([
+      {
+        id: "smc-1",
+        managementSource: "GAME_RELEASE",
+        name: "ferritecore.jar",
+        targetPath: "mods/ferritecore.jar",
+        sha256: "hash1",
+        sizeBytes: 1000,
+        contentType: "MOD",
+        status: "INSTALLED",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+    vi.spyOn(serverContentApi, "getServerReleaseSyncPlan").mockResolvedValue({
+      isPending: false,
+      items: [],
+      summary: { toInstall: 0, toUpdate: 0, toRemove: 0, toKeep: 1 },
+      serverStatus: "OFFLINE",
+      canApply: true,
+    })
+
+    await act(async () => {
+      render(
+        <ServerFilesView
+          serverId="srv-1"
+          theme="dark"
+          serverStatus="OFFLINE"
+          onToast={onToastMock}
+          onNavigateToGame={onNavigateToGameMock}
+        />,
+      )
+    })
+
+    // Click delete on the GAME_RELEASE row
+    const deleteBtn = screen.getByTitle("Eliminar")
+    await act(async () => {
+      fireEvent.click(deleteBtn)
+    })
+
+    // The modal-blocked-delete should be open
+    expect(screen.getByTestId("modal-blocked-delete")).toBeDefined()
+    expect(screen.getByText("Archivo de la versión del juego")).toBeDefined()
+
+    // Force delete button should exist and say "Eliminar de todas formas"
+    const forceDeleteBtn = screen.getByTestId("button-force-delete-from-server")
+    expect(forceDeleteBtn).toBeDefined()
+    expect(forceDeleteBtn.textContent).toContain("Eliminar de todas formas")
+
+    // Click force delete
+    await act(async () => {
+      fireEvent.click(forceDeleteBtn)
+    })
+
+    // Should call deleteServerFile
+    expect(deleteSpy).toHaveBeenCalledWith("SERVER", "ferritecore.jar", "srv-1")
+    expect(onToastMock).toHaveBeenCalledWith("Elemento eliminado exitosamente del servidor.", "success")
+
+    // Modal should close
+    expect(screen.queryByTestId("modal-blocked-delete")).toBeNull()
+  })
+
   it("Shard 08D Test 2: ServerFilesView renders pending release sync banner and opens modal", async () => {
     const { serverContentApi } = await import("../../services/graphqlClient")
 

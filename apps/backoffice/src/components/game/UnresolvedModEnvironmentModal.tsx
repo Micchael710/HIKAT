@@ -2,6 +2,7 @@ import React, { useState } from "react"
 import type { ThemeMode, ModEnvironment } from "../../types"
 import { getThemeTokens } from "../../theme/tokens"
 import { IconCross, IconBox } from "../../theme/icons"
+import ModEnvironmentRadioGroup from "./ModEnvironmentRadioGroup"
 
 export interface UnresolvedModItem {
   logicalPath: string
@@ -24,6 +25,8 @@ export default function UnresolvedModEnvironmentModal({
   const isDark = theme === "dark"
   const tokens = getThemeTokens(theme)
 
+  const isSingle = unresolvedMods.length === 1
+
   const [environments, setEnvironments] = useState<Record<string, ModEnvironment>>(() => {
     const initial: Record<string, ModEnvironment> = {}
     for (const mod of unresolvedMods) {
@@ -33,6 +36,7 @@ export default function UnresolvedModEnvironmentModal({
   })
 
   const [globalEnv, setGlobalEnv] = useState<ModEnvironment>("BOTH")
+  const [showIndividual, setShowIndividual] = useState(false)
 
   const handleGlobalChange = (env: ModEnvironment) => {
     setGlobalEnv(env)
@@ -78,7 +82,7 @@ export default function UnresolvedModEnvironmentModal({
           border: `1px solid ${tokens.borderSubtle}`,
           borderRadius: "18px",
           width: "100%",
-          maxWidth: "560px",
+          maxWidth: "540px",
           maxHeight: "90vh",
           display: "flex",
           flexDirection: "column",
@@ -121,10 +125,12 @@ export default function UnresolvedModEnvironmentModal({
                   color: tokens.textPrimary,
                 }}
               >
-                Entorno de mods no identificados
+                {isSingle ? "¿Dónde necesita ejecutarse este mod?" : "Entorno de mods no identificados"}
               </h2>
               <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: tokens.textMuted }}>
-                No se encontró en Modrinth/CurseForge {unresolvedMods.length} mod(s). Selecciona el entorno:
+                {isSingle
+                  ? "No se localizó en Modrinth ni CurseForge. Selecciona su entorno:"
+                  : `No se localizó en Modrinth ni CurseForge ${unresolvedMods.length} mod(s). Selecciona el entorno:`}
               </p>
             </div>
           </div>
@@ -164,114 +170,129 @@ export default function UnresolvedModEnvironmentModal({
               gap: "16px",
             }}
           >
-            {unresolvedMods.length > 1 && (
-              <div
-                style={{
-                  padding: "12px 16px",
-                  borderRadius: "12px",
-                  backgroundColor: tokens.bgCardInner,
-                  border: `1px solid ${tokens.borderSubtle}`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "12px",
-                }}
-              >
-                <span style={{ fontSize: "13px", fontWeight: "600", color: tokens.textPrimary }}>
-                  Aplicar a todos:
-                </span>
-                <div style={{ display: "flex", gap: "6px" }}>
-                  {(["BOTH", "CLIENT", "SERVER"] as ModEnvironment[]).map((env) => (
-                    <button
-                      key={env}
-                      type="button"
-                      onClick={() => handleGlobalChange(env)}
-                      style={{
-                        padding: "6px 12px",
-                        borderRadius: "8px",
-                        fontSize: "12px",
-                        fontWeight: "600",
-                        cursor: "pointer",
-                        border: `1px solid ${globalEnv === env ? "#3ec4c0" : tokens.borderSubtle}`,
-                        backgroundColor:
-                          globalEnv === env
-                            ? isDark
-                              ? "rgba(62, 196, 192, 0.2)"
-                              : "#e0f2fe"
-                            : "transparent",
-                        color: globalEnv === env ? (isDark ? "#3ec4c0" : "#0284c7") : tokens.textSecondary,
-                      }}
-                    >
-                      {env === "BOTH" ? "Cliente y Servidor" : env === "CLIENT" ? "Solo Cliente" : "Solo Servidor"}
-                    </button>
-                  ))}
+            {isSingle ? (
+              <>
+                <div
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "10px",
+                    backgroundColor: tokens.bgCardInner,
+                    border: `1px solid ${tokens.borderSubtle}`,
+                    fontSize: "13px",
+                    fontWeight: "600",
+                    color: tokens.textPrimary,
+                    wordBreak: "break-all",
+                  }}
+                >
+                  📦 {unresolvedMods[0]!.filename}
                 </div>
-              </div>
-            )}
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              {unresolvedMods.map((mod) => {
-                const currentEnv = environments[mod.logicalPath] || "BOTH"
-                return (
+                <ModEnvironmentRadioGroup
+                  theme={theme}
+                  value={environments[unresolvedMods[0]!.logicalPath] || "BOTH"}
+                  onChange={(env) => handleItemChange(unresolvedMods[0]!.logicalPath, env)}
+                  label=""
+                />
+              </>
+            ) : (
+              <>
+                {/* Multi-mod selector */}
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: "12px",
+                    backgroundColor: tokens.bgCardInner,
+                    border: `1px solid ${tokens.borderSubtle}`,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px",
+                  }}
+                >
+                  <div style={{ fontSize: "12px", fontWeight: "700", color: tokens.textSecondary }}>
+                    Archivos pendientes ({unresolvedMods.length}):
+                  </div>
                   <div
-                    key={mod.logicalPath}
                     style={{
-                      padding: "14px 16px",
-                      borderRadius: "12px",
-                      border: `1px solid ${tokens.borderSubtle}`,
-                      backgroundColor: tokens.bgCardInner,
+                      maxHeight: "80px",
+                      overflowY: "auto",
                       display: "flex",
                       flexDirection: "column",
-                      gap: "10px",
+                      gap: "4px",
+                      fontSize: "12px",
+                      color: tokens.textPrimary,
                     }}
                   >
-                    <div style={{ fontSize: "13px", fontWeight: "600", color: tokens.textPrimary, wordBreak: "break-all" }}>
-                      📦 {mod.filename}
-                    </div>
+                    {unresolvedMods.map((m) => (
+                      <div key={m.logicalPath} style={{ wordBreak: "break-all" }}>
+                        • {m.filename}
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                      {[
-                        { key: "BOTH", label: "Cliente y Servidor (BOTH)" },
-                        { key: "CLIENT", label: "Solo Cliente (CLIENT)" },
-                        { key: "SERVER", label: "Solo Servidor (SERVER)" },
-                      ].map((opt) => (
-                        <label
-                          key={opt.key}
+                <div>
+                  <ModEnvironmentRadioGroup
+                    theme={theme}
+                    value={globalEnv}
+                    onChange={handleGlobalChange}
+                    label="¿Dónde necesitan ejecutarse estos mods?"
+                  />
+                </div>
+
+                <div style={{ marginTop: "4px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowIndividual(!showIndividual)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: isDark ? "#3ec4c0" : "#0284c7",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      fontWeight: "600",
+                      padding: 0,
+                    }}
+                  >
+                    {showIndividual ? "▲ Ocultar selección por mod" : "▼ Ajustar entorno individualmente por mod"}
+                  </button>
+
+                  {showIndividual && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "12px" }}>
+                      {unresolvedMods.map((mod) => (
+                        <div
+                          key={mod.logicalPath}
                           style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "6px",
-                            padding: "6px 10px",
-                            borderRadius: "8px",
-                            border: `1px solid ${currentEnv === opt.key ? "#3ec4c0" : tokens.borderSubtle}`,
-                            backgroundColor:
-                              currentEnv === opt.key
-                                ? isDark
-                                  ? "rgba(62, 196, 192, 0.12)"
-                                  : "#f0fdfa"
-                                : "transparent",
-                            cursor: "pointer",
-                            fontSize: "12px",
-                            color: currentEnv === opt.key ? tokens.textPrimary : tokens.textSecondary,
-                            fontWeight: currentEnv === opt.key ? "600" : "400",
+                            padding: "12px 14px",
+                            borderRadius: "10px",
+                            border: `1px solid ${tokens.borderSubtle}`,
+                            backgroundColor: tokens.bgCardInner,
                           }}
                         >
-                          <input
-                            type="radio"
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              fontWeight: "700",
+                              color: tokens.textPrimary,
+                              marginBottom: "8px",
+                              wordBreak: "break-all",
+                            }}
+                          >
+                            📦 {mod.filename}
+                          </div>
+                          <ModEnvironmentRadioGroup
+                            theme={theme}
+                            value={environments[mod.logicalPath] || "BOTH"}
+                            onChange={(env) => handleItemChange(mod.logicalPath, env)}
                             name={`env-${mod.logicalPath}`}
-                            value={opt.key}
-                            checked={currentEnv === opt.key}
-                            onChange={() => handleItemChange(mod.logicalPath, opt.key as ModEnvironment)}
-                            style={{ accentColor: "#3ec4c0" }}
+                            label=""
                           />
-                          <span>{opt.label}</span>
-                        </label>
+                        </div>
                       ))}
                     </div>
-                  </div>
-                )
-              })}
-            </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Footer Actions */}

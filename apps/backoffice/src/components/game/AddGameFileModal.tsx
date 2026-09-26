@@ -6,6 +6,7 @@ import { uploadGameFileDirect, computeJarHashes } from "../../services/gameFileU
 import { getThemeTokens } from "../../theme/tokens"
 import { IconCross, IconUpload, IconSpinner, IconBox } from "../../theme/icons"
 import BackofficeSelect, { SelectOption } from "../common/BackofficeSelect"
+import ModEnvironmentRadioGroup from "./ModEnvironmentRadioGroup"
 
 interface AddGameFileModalProps {
   theme: ThemeMode
@@ -387,7 +388,7 @@ export default function AddGameFileModal({
                     color: tokens.textSecondary,
                   }}
                 >
-                  Entorno del mod
+                  ¿Dónde necesita ejecutarse este mod?
                 </label>
                 {isDetecting && (
                   <span
@@ -414,112 +415,12 @@ export default function AddGameFileModal({
                   </span>
                 )}
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    padding: "8px 12px",
-                    borderRadius: "10px",
-                    border: `1px solid ${environment === "BOTH" ? "#3ec4c0" : tokens.borderSubtle}`,
-                    backgroundColor:
-                      environment === "BOTH"
-                        ? isDark
-                          ? "rgba(62, 196, 192, 0.1)"
-                          : "#f0fdfa"
-                        : tokens.bgCardInner,
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    color: tokens.textPrimary,
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="mod-environment"
-                    value="BOTH"
-                    checked={environment === "BOTH"}
-                    onChange={() => setEnvironment("BOTH")}
-                    style={{ accentColor: "#3ec4c0" }}
-                  />
-                  <div>
-                    <strong>Cliente y Servidor (BOTH)</strong>
-                    <div style={{ fontSize: "11px", color: tokens.textSecondary }}>
-                      Recomendado para la mayoría de mods con bloques, items o mecánicas.
-                    </div>
-                  </div>
-                </label>
-
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    padding: "8px 12px",
-                    borderRadius: "10px",
-                    border: `1px solid ${environment === "CLIENT" ? "#3ec4c0" : tokens.borderSubtle}`,
-                    backgroundColor:
-                      environment === "CLIENT"
-                        ? isDark
-                          ? "rgba(62, 196, 192, 0.1)"
-                          : "#f0fdfa"
-                        : tokens.bgCardInner,
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    color: tokens.textPrimary,
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="mod-environment"
-                    value="CLIENT"
-                    checked={environment === "CLIENT"}
-                    onChange={() => setEnvironment("CLIENT")}
-                    style={{ accentColor: "#3ec4c0" }}
-                  />
-                  <div>
-                    <strong>Solo Cliente (CLIENT)</strong>
-                    <div style={{ fontSize: "11px", color: tokens.textSecondary }}>
-                      Solo jugadores (minimapas, JEI/REI, shaders, interfaz visual).
-                    </div>
-                  </div>
-                </label>
-
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    padding: "8px 12px",
-                    borderRadius: "10px",
-                    border: `1px solid ${environment === "SERVER" ? "#3ec4c0" : tokens.borderSubtle}`,
-                    backgroundColor:
-                      environment === "SERVER"
-                        ? isDark
-                          ? "rgba(62, 196, 192, 0.1)"
-                          : "#f0fdfa"
-                        : tokens.bgCardInner,
-                    cursor: "pointer",
-                    fontSize: "13px",
-                    color: tokens.textPrimary,
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="mod-environment"
-                    value="SERVER"
-                    checked={environment === "SERVER"}
-                    onChange={() => setEnvironment("SERVER")}
-                    style={{ accentColor: "#3ec4c0" }}
-                  />
-                  <div>
-                    <strong>Solo Servidor (SERVER)</strong>
-                    <div style={{ fontSize: "11px", color: tokens.textSecondary }}>
-                      Exclusivo para el servidor (herramientas administrativas, permisos).
-                    </div>
-                  </div>
-                </label>
-              </div>
+              <ModEnvironmentRadioGroup
+                theme={theme}
+                value={environment}
+                onChange={setEnvironment}
+                label=""
+              />
             </div>
           )}
 

@@ -207,6 +207,26 @@ export default function ServerFilesView({ theme, serverId, serverStatus, onToast
     }
   }
 
+  // Force delete for GAME_RELEASE managed files directly from server
+  const handleForceDelete = async (file: ServerFileItem) => {
+    if (isDisconnected) return
+    setIsDeleting(true)
+    const targetRelative = currentPath ? `${currentPath}/${file.name}` : file.name
+    try {
+      await serverApi.deleteServerFile("SERVER", targetRelative, serverId)
+      onToast("Elemento eliminado exitosamente del servidor.", "success")
+      setBlockedDeleteTarget(null)
+      await fetchFiles(true)
+    } catch (err: unknown) {
+      onToast(
+        err instanceof Error ? err.message : "Error al eliminar el elemento.",
+        "error",
+      )
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   // Download
   const handleDownload = async (file: ServerFileItem) => {
     if (isDisconnected) return
@@ -1302,13 +1322,37 @@ export default function ServerFilesView({ theme, serverId, serverStatus, onToast
               Para eliminarlo o actualizarlo de manera sincronizada con el cliente de los jugadores, modifícalo desde <strong>Juego → Actualizaciones</strong>.
             </p>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 8 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
               <button
                 type="button"
                 onClick={() => setBlockedDeleteTarget(null)}
                 className="launcher-btn-secondary"
+                disabled={isDeleting}
               >
-                Entendido
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                data-testid="button-force-delete-from-server"
+                onClick={() => handleForceDelete(blockedDeleteTarget.file)}
+                disabled={isDeleting}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "8px 16px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "#dc2626",
+                  color: "#ffffff",
+                  cursor: isDeleting ? "not-allowed" : "pointer",
+                  fontWeight: 600,
+                  fontSize: "13px",
+                }}
+              >
+                {isDeleting ? <IconSpinner size={15} /> : <IconTrash size={15} />}
+                <span>{isDeleting ? "Eliminando..." : "Eliminar de todas formas"}</span>
               </button>
 
               {onNavigateToGame && (
@@ -1320,6 +1364,13 @@ export default function ServerFilesView({ theme, serverId, serverStatus, onToast
                     onNavigateToGame()
                   }}
                   className="launcher-btn-primary"
+                  disabled={isDeleting}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: 10,
+                    fontWeight: 600,
+                    fontSize: "13px",
+                  }}
                 >
                   Ir a Actualizaciones →
                 </button>

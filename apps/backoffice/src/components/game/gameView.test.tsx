@@ -4285,13 +4285,13 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         })
       })
 
-      // The modal should now be visible asking for environment
-      expect(await screen.findByText("Entorno de mods no identificados")).toBeDefined()
+      // The modal should now be visible asking for environment with identical provider UI
+      expect(await screen.findByText("¿Dónde necesita ejecutarse este mod?")).toBeDefined()
       expect(screen.getByText("📦 custom-mod.jar")).toBeDefined()
 
-      // Select "Solo Servidor (SERVER)"
-      const serverRadio = screen.getByLabelText(/Solo Servidor \(SERVER\)/i)
-      fireEvent.click(serverRadio)
+      // Select "Solo servidor"
+      const serverOption = screen.getByTestId("option-env-server")
+      fireEvent.click(serverOption)
 
       // Click "Continuar subida"
       const continueBtn = screen.getByText("Continuar subida")
@@ -4351,7 +4351,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
         })
       })
 
-      expect(await screen.findByText("Entorno de mods no identificados")).toBeDefined()
+      expect(await screen.findByText("¿Dónde necesita ejecutarse este mod?")).toBeDefined()
 
       // Click "Cancelar"
       const cancelBtn = screen.getByRole("button", { name: "Cancelar" })
@@ -4360,7 +4360,7 @@ describe("Back Office Game Files Explorer Suite (Shard 8A)", () => {
       })
 
       // Modal closes and batch upload was NEVER initiated
-      expect(screen.queryByText("Entorno de mods no identificados")).toBeNull()
+      expect(screen.queryByText("¿Dónde necesita ejecutarse este mod?")).toBeNull()
       expect(createBatchSpy).not.toHaveBeenCalled()
     })
   })
