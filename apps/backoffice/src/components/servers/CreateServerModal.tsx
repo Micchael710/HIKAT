@@ -43,6 +43,12 @@ const LOADER_OPTIONS = [
   { value: "QUILT", label: "Quilt" },
 ]
 
+function matchesJavaMajor(img: { name: string; image: string }, majorVersion: number): boolean {
+  const target = String(majorVersion)
+  const regex = new RegExp(`(?:java[ _-]?|:java_?)${target}(?:[^0-9]|$)`, "i")
+  return regex.test(img.name) || regex.test(img.image)
+}
+
 export default function CreateServerModal({
   isOpen,
   onClose,
@@ -189,8 +195,6 @@ export default function CreateServerModal({
       const images = await serverApi.getServerEggDockerImages(modLdr as any)
       if (!isMountedRef.current) return
       setServerDockerImages(images || [])
-      const def = images?.find((img) => img.isDefault) || images?.[0]
-      setSelectedDockerImage(def ? def.image : "")
     } catch {
       if (isMountedRef.current) {
         setServerDockerImages([])
@@ -268,6 +272,20 @@ export default function CreateServerModal({
     if (!isOpen || !minecraftVersion) return
     fetchClientJavaVersions(minecraftVersion)
   }, [isOpen, minecraftVersion, fetchClientJavaVersions])
+
+  // Synchronize server Docker image selection with client recommended Java version
+  useEffect(() => {
+    if (!serverDockerImages || serverDockerImages.length === 0) {
+      setSelectedDockerImage("")
+      return
+    }
+    const recClientMajor = clientJavaVersions.find((v) => v.isRecommended)?.majorVersion
+    const matched = recClientMajor
+      ? serverDockerImages.find((img) => matchesJavaMajor(img, recClientMajor))
+      : null
+    const def = matched || serverDockerImages[0]
+    setSelectedDockerImage(def ? def.image : "")
+  }, [serverDockerImages, clientJavaVersions])
 
   // Handle Main / Wide Logo File (horizontal banner)
   const handleWideLogoSelected = (file: File) => {
@@ -878,26 +896,37 @@ export default function CreateServerModal({
                       <IconSpinner size={16} /> Cargando versiones...
                     </div>
                   ) : serverDockerImages.length > 0 ? (
-                    <select
-                      value={selectedDockerImage}
-                      onChange={(e) => setSelectedDockerImage(e.target.value)}
-                      style={{
-                        width: "100%",
-                        padding: "11px 14px",
-                        borderRadius: 10,
-                        border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
-                        background: isDark ? "#0d141a" : "#ffffff",
-                        color: isDark ? "#ffffff" : "#111822",
-                        fontSize: 14,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {serverDockerImages.map((img) => (
-                        <option key={img.image} value={img.image}>
-                          {img.isDefault ? `${img.name} (Recomendado)` : img.name}
-                        </option>
-                      ))}
-                    </select>
+                    (() => {
+                      const recClientMajor = clientJavaVersions.find((v) => v.isRecommended)?.majorVersion
+                      const recommendedServerImg =
+                        (recClientMajor && serverDockerImages.find((img) => matchesJavaMajor(img, recClientMajor))) ||
+                        serverDockerImages[0]
+                      return (
+                        <select
+                          value={selectedDockerImage}
+                          onChange={(e) => setSelectedDockerImage(e.target.value)}
+                          style={{
+                            width: "100%",
+                            padding: "11px 14px",
+                            borderRadius: 10,
+                            border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
+                            background: isDark ? "#0d141a" : "#ffffff",
+                            color: isDark ? "#ffffff" : "#111822",
+                            fontSize: 14,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {serverDockerImages.map((img) => {
+                            const isRec = img.image === recommendedServerImg?.image
+                            return (
+                              <option key={img.image} value={img.image}>
+                                {isRec ? `${img.name} (Recomendado)` : img.name}
+                              </option>
+                            )
+                          })}
+                        </select>
+                      )
+                    })()
                   ) : (
                     <div style={{ fontSize: 13, color: "#64748b", height: 42, display: "flex", alignItems: "center" }}>
                       Por defecto del egg
