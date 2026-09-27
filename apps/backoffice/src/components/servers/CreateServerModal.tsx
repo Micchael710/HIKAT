@@ -876,9 +876,9 @@ export default function CreateServerModal({
                 )}
               </div>
 
-              {/* Versión del servidor & Versión del cliente */}
+              {/* Versión de Java (Servidor) & Versión de Java (Cliente) */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                {/* Versión del servidor */}
+                {/* Versión de Java (Servidor) */}
                 <div>
                   <label
                     style={{
@@ -889,7 +889,7 @@ export default function CreateServerModal({
                       marginBottom: 6,
                     }}
                   >
-                    Versión del servidor
+                    Versión de Java (Servidor)
                   </label>
                   {serverDockerImagesLoading ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#64748b", fontSize: 13, height: 42 }}>
@@ -934,7 +934,7 @@ export default function CreateServerModal({
                   )}
                 </div>
 
-                {/* Versión del cliente */}
+                {/* Versión de Java (Cliente) */}
                 <div>
                   <label
                     style={{
@@ -945,7 +945,7 @@ export default function CreateServerModal({
                       marginBottom: 6,
                     }}
                   >
-                    Versión del cliente
+                    Versión de Java (Cliente)
                   </label>
                   {clientJavaVersionsLoading ? (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#64748b", fontSize: 13, height: 42 }}>
