@@ -444,6 +444,8 @@ class GameLauncher {
         "-XX:InitiatingHeapOccupancyPercent=30",
       ]
 
+      const javaModernArgs = requiredJavaMajor >= 24 ? ["--enable-native-access=ALL-UNNAMED"] : []
+
       const launchOptions = {
         gamePath: effectiveInstanceRoot,
         resourcePath: effectiveInstanceRoot,
@@ -456,7 +458,7 @@ class GameLauncher {
         userType: "legacy",
         minMemory: minMemoryMb,
         maxMemory: maxMemoryMb,
-        extraJVMArgs: [...jvmOptimizationArgs, ...customArgs],
+        extraJVMArgs: [...jvmOptimizationArgs, ...javaModernArgs, ...customArgs],
         extraExecOption: {
           detached: true,
           stdio: "ignore",

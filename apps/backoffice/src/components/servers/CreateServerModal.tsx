@@ -6,6 +6,8 @@ import type {
   GameEnvironmentCatalog,
   GameLoaderVersion,
   ServerNodeCapacity,
+  ServerEggDockerImage,
+  ClientCompatibleJavaVersion,
 } from "../../types"
 import { SERVER_MAX_CPU_PERCENT } from "@hikat/shared"
 import { serverApi, gameApi } from "../../services/graphqlClient"
@@ -65,6 +67,14 @@ export default function CreateServerModal({
   const [loaderVersionsLoading, setLoaderVersionsLoading] = useState(false)
   const [loaderVersionsError, setLoaderVersionsError] = useState<string | null>(null)
   const [loaderVersion, setLoaderVersion] = useState("")
+
+  // Server & Client Java versions
+  const [serverDockerImages, setServerDockerImages] = useState<ServerEggDockerImage[]>([])
+  const [serverDockerImagesLoading, setServerDockerImagesLoading] = useState(false)
+  const [selectedDockerImage, setSelectedDockerImage] = useState<string>("")
+  const [clientJavaVersions, setClientJavaVersions] = useState<ClientCompatibleJavaVersion[]>([])
+  const [clientJavaVersionsLoading, setClientJavaVersionsLoading] = useState(false)
+  const [selectedClientJava, setSelectedClientJava] = useState<number | null>(null)
 
   // Step 3: Resources
   const [cpu, setCpu] = useState<number>(200)
@@ -162,12 +172,52 @@ export default function CreateServerModal({
     setError(null)
     setCatalogError(null)
     setLoaderVersionsError(null)
+    setSelectedDockerImage("")
+    setSelectedClientJava(null)
+    setServerDockerImages([])
+    setClientJavaVersions([])
     setIsSubmitting(false)
     setSubmitStatusText(null)
 
     fetchCatalog()
     fetchNodeCapacity()
   }, [isOpen, fetchCatalog, fetchNodeCapacity])
+
+  const fetchServerEggImages = useCallback(async (modLdr: string) => {
+    setServerDockerImagesLoading(true)
+    try {
+      const images = await serverApi.getServerEggDockerImages(modLdr as any)
+      if (!isMountedRef.current) return
+      setServerDockerImages(images || [])
+      const def = images?.find((img) => img.isDefault) || images?.[0]
+      setSelectedDockerImage(def ? def.image : "")
+    } catch {
+      if (isMountedRef.current) {
+        setServerDockerImages([])
+        setSelectedDockerImage("")
+      }
+    } finally {
+      if (isMountedRef.current) setServerDockerImagesLoading(false)
+    }
+  }, [])
+
+  const fetchClientJavaVersions = useCallback(async (mcVer: string) => {
+    setClientJavaVersionsLoading(true)
+    try {
+      const versions = await serverApi.getClientCompatibleJavaVersions(mcVer)
+      if (!isMountedRef.current) return
+      setClientJavaVersions(versions || [])
+      const rec = versions?.find((v) => v.isRecommended) || versions?.[0]
+      setSelectedClientJava(rec ? rec.majorVersion : null)
+    } catch {
+      if (isMountedRef.current) {
+        setClientJavaVersions([])
+        setSelectedClientJava(null)
+      }
+    } finally {
+      if (isMountedRef.current) setClientJavaVersionsLoading(false)
+    }
+  }, [])
 
   const fetchLoaderVersions = useCallback(async (mcVer: string, modLdr: string) => {
     if (modLdr === "VANILLA") {
@@ -206,6 +256,18 @@ export default function CreateServerModal({
     if (!isOpen || !minecraftVersion) return
     fetchLoaderVersions(minecraftVersion, loader)
   }, [isOpen, loader, minecraftVersion, fetchLoaderVersions])
+
+  // Fetch server egg docker images whenever loader changes
+  useEffect(() => {
+    if (!isOpen) return
+    fetchServerEggImages(loader)
+  }, [isOpen, loader, fetchServerEggImages])
+
+  // Fetch client compatible Java versions whenever minecraftVersion changes
+  useEffect(() => {
+    if (!isOpen || !minecraftVersion) return
+    fetchClientJavaVersions(minecraftVersion)
+  }, [isOpen, minecraftVersion, fetchClientJavaVersions])
 
   // Handle Main / Wide Logo File (horizontal banner)
   const handleWideLogoSelected = (file: File) => {
@@ -335,6 +397,8 @@ export default function CreateServerModal({
         minecraftVersion: minecraftVersion.trim(),
         modLoader: loader as import("../../types").GameModLoader,
         modLoaderVersion: loader !== "VANILLA" && loaderVersion.trim() ? loaderVersion.trim() : undefined,
+        dockerImage: selectedDockerImage?.trim() || undefined,
+        clientJavaMajorVersion: selectedClientJava !== null ? selectedClientJava : undefined,
         cpu,
         memoryMb: ram,
         diskMb: disk,
@@ -792,6 +856,99 @@ export default function CreateServerModal({
                     ) : null}
                   </div>
                 )}
+              </div>
+
+              {/* Versión del servidor & Versión del cliente */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                {/* Versión del servidor */}
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: isDark ? "#cbd5e1" : "#334155",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Versión del servidor
+                  </label>
+                  {serverDockerImagesLoading ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#64748b", fontSize: 13, height: 42 }}>
+                      <IconSpinner size={16} /> Cargando versiones...
+                    </div>
+                  ) : serverDockerImages.length > 0 ? (
+                    <select
+                      value={selectedDockerImage}
+                      onChange={(e) => setSelectedDockerImage(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "11px 14px",
+                        borderRadius: 10,
+                        border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
+                        background: isDark ? "#0d141a" : "#ffffff",
+                        color: isDark ? "#ffffff" : "#111822",
+                        fontSize: 14,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {serverDockerImages.map((img) => (
+                        <option key={img.image} value={img.image}>
+                          {img.isDefault ? `${img.name} (Recomendado)` : img.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div style={{ fontSize: 13, color: "#64748b", height: 42, display: "flex", alignItems: "center" }}>
+                      Por defecto del egg
+                    </div>
+                  )}
+                </div>
+
+                {/* Versión del cliente */}
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: isDark ? "#cbd5e1" : "#334155",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Versión del cliente
+                  </label>
+                  {clientJavaVersionsLoading ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#64748b", fontSize: 13, height: 42 }}>
+                      <IconSpinner size={16} /> Cargando versiones...
+                    </div>
+                  ) : clientJavaVersions.length > 0 ? (
+                    <select
+                      value={selectedClientJava !== null ? String(selectedClientJava) : ""}
+                      onChange={(e) => setSelectedClientJava(Number(e.target.value))}
+                      style={{
+                        width: "100%",
+                        padding: "11px 14px",
+                        borderRadius: 10,
+                        border: `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
+                        background: isDark ? "#0d141a" : "#ffffff",
+                        color: isDark ? "#ffffff" : "#111822",
+                        fontSize: 14,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {clientJavaVersions.map((v) => (
+                        <option key={v.majorVersion} value={v.majorVersion}>
+                          {v.isRecommended ? `${v.name} (Recomendado)` : v.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div style={{ fontSize: 13, color: "#64748b", height: 42, display: "flex", alignItems: "center" }}>
+                      Por defecto
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
@@ -1355,6 +1512,15 @@ export default function CreateServerModal({
                     </span>
                     <span style={{ color: isDark ? "#ffffff" : "#111822" }}>
                       MC {minecraftVersion} · {loader} {loaderVersion ? `(${loaderVersion})` : ""}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span style={{ color: isDark ? "#94a3b8" : "#64748b", display: "block", fontSize: 11.5, fontWeight: 600, textTransform: "uppercase" }}>
+                      Versiones de Java
+                    </span>
+                    <span style={{ color: isDark ? "#ffffff" : "#111822" }}>
+                      Servidor: {serverDockerImages.find((i) => i.image === selectedDockerImage)?.name || "Por defecto"} · Cliente: {selectedClientJava ? `Java ${selectedClientJava}` : "Por defecto"}
                     </span>
                   </div>
 

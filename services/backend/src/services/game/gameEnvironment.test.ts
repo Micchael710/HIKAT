@@ -4,6 +4,7 @@ import {
   getLoaderVersions,
   validateGameEnvironment,
   clearGameEnvironmentCache,
+  getClientCompatibleJavaVersions,
 } from "./gameEnvironmentService"
 
 describe("GameEnvironmentService - Multi-Loader System Tests", () => {
@@ -100,6 +101,32 @@ describe("GameEnvironmentService - Multi-Loader System Tests", () => {
       await expect(validateGameEnvironment("1.21.1", "FABRIC", "0.16.10")).rejects.toThrow(
         /No se pudo verificar la versión de FABRIC con la fuente oficial/i,
       )
+    })
+  })
+
+  describe("3. Client Compatible Java Versions", () => {
+    it("returns Java 21 (recommended) and Java 25 for Minecraft 1.21.1", async () => {
+      const versions = await getClientCompatibleJavaVersions("1.21.1")
+      expect(versions).toEqual([
+        { majorVersion: 21, name: "Java 21", isRecommended: true },
+        { majorVersion: 25, name: "Java 25", isRecommended: false },
+      ])
+    })
+
+    it("returns Java 17 (recommended), Java 21, and Java 25 for Minecraft 1.20.1", async () => {
+      const versions = await getClientCompatibleJavaVersions("1.20.1")
+      expect(versions).toEqual([
+        { majorVersion: 17, name: "Java 17", isRecommended: true },
+        { majorVersion: 21, name: "Java 21", isRecommended: false },
+        { majorVersion: 25, name: "Java 25", isRecommended: false },
+      ])
+    })
+
+    it("returns Java 8 (recommended) for Minecraft 1.12.2", async () => {
+      const versions = await getClientCompatibleJavaVersions("1.12.2")
+      expect(versions).toEqual([
+        { majorVersion: 8, name: "Java 8", isRecommended: true },
+      ])
     })
   })
 })

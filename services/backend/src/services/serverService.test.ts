@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { eq } from "drizzle-orm"
 import { createDatabase, schema } from "@hikat/database"
 import { createTestD1 } from "@hikat/database/testUtils"
 import {
@@ -16,6 +17,7 @@ import {
   updateEulaBootstrap,
   resolveServerAllocationPort,
   syncServerProvisioningStatus,
+  getServerEggDockerImages,
 } from "./serverService"
 import * as releaseEventsModule from "../releaseEvents"
 import { handleGameFileDownload } from "./game/gameStorageService"
@@ -33,7 +35,6 @@ import { applyServerReleaseSync } from "./pterodactyl/serverReleaseSyncService"
 import { createNews, updateNews, publishNews, unpublishNews, deleteNews } from "./newsService"
 import type { IPterodactylClient } from "./pterodactyl/types"
 import type { Env } from "../types"
-import { eq } from "drizzle-orm"
 
 function createMockD1() {
   const d1 = createTestD1()
@@ -407,6 +408,100 @@ describe("ServerService & Multi-Server Provisioning", () => {
         MC_VERSION: "1.20.1",
         QUILT_LOADER_VERSION: "0.25.0",
       })
+    })
+
+    it("provisions server with custom dockerImage and clientJavaMajorVersion when provided", async () => {
+      const server = await createServer(
+        mockDb,
+        mockEnv,
+        {
+          name: "Custom Java Server",
+          minecraftVersion: "1.21.1",
+          modLoader: "NEOFORGE",
+          modLoaderVersion: "21.1.65",
+          dockerImage: "pterodactyl-java25-opencl:latest",
+          clientJavaMajorVersion: 25,
+          cpu: 200,
+          memoryMb: 4096,
+          diskMb: 10240,
+        },
+        "user-1",
+        mockClient,
+      )
+
+      expect(server.provisioningStatus).toBe("PROVISIONING")
+      expect(server.clientJavaMajorVersion).toBe(25)
+      const call = (mockClient.createApplicationServer as any).mock.calls[0][0]
+      expect(call.docker_image).toBe("pterodactyl-java25-opencl:latest")
+
+      // Verify stored in D1
+      const stored = await mockDb
+        .select()
+        .from(schema.servers)
+        .where(eq(schema.servers.id, server.id))
+        .get()
+      expect(stored?.clientJavaMajorVersion).toBe(25)
+    })
+
+    it("getServerEggDockerImages fetches images from egg and flags default image", async () => {
+      const customClient = {
+        ...mockClient,
+        getApplicationEgg: vi.fn().mockResolvedValue({
+          object: "egg",
+          attributes: {
+            id: 15,
+            name: "NeoForge",
+            docker_image: "ghcr.io/pterodactyl/yolks:java_21",
+            docker_images: {
+              "Java 21": "ghcr.io/pterodactyl/yolks:java_21",
+              "Java 25": "ghcr.io/pterodactyl/yolks:java_25",
+              "Java 25 (OpenCL)": "pterodactyl-java25-opencl:latest",
+            },
+          },
+        }),
+      }
+
+      const images = await getServerEggDockerImages("NEOFORGE", mockEnv, customClient as any)
+      expect(images).toHaveLength(3)
+      expect(images[0]).toEqual({
+        name: "Java 21",
+        image: "ghcr.io/pterodactyl/yolks:java_21",
+        isDefault: true,
+      })
+      expect(images[1]).toEqual({
+        name: "Java 25",
+        image: "ghcr.io/pterodactyl/yolks:java_25",
+        isDefault: false,
+      })
+      expect(images[2]).toEqual({
+        name: "Java 25 (OpenCL)",
+        image: "pterodactyl-java25-opencl:latest",
+        isDefault: false,
+      })
+    })
+
+    it("getServerEggDockerImages returns fallback when docker_images map is empty", async () => {
+      const customClient = {
+        ...mockClient,
+        getApplicationEgg: vi.fn().mockResolvedValue({
+          object: "egg",
+          attributes: {
+            id: 15,
+            name: "NeoForge",
+            docker_image: "ghcr.io/pterodactyl/yolks:java_21",
+            docker_images: {},
+          },
+        }),
+      }
+
+      const images = await getServerEggDockerImages("NEOFORGE", mockEnv, customClient as any)
+      expect(images).toEqual([
+        {
+          name: "Default",
+          image: "ghcr.io/pterodactyl/yolks:java_21",
+          isDefault: true,
+        },
+      ])
     })
 
     it("rejects server creation when modLoader egg ID environment variable is missing", async () => {

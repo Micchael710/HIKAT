@@ -417,6 +417,24 @@ export const serverTypeDefs = /* GraphQL */ `
   }
 
   """
+  Docker image available for a Pterodactyl egg
+  """
+  type ServerEggDockerImage {
+    name: String!
+    image: String!
+    isDefault: Boolean!
+  }
+
+  """
+  Java version compatible with a given Minecraft version for the client
+  """
+  type ClientCompatibleJavaVersion {
+    majorVersion: Int!
+    name: String!
+    isRecommended: Boolean!
+  }
+
+  """
   HiKAT Server Entity
   """
   type Server {
@@ -425,6 +443,7 @@ export const serverTypeDefs = /* GraphQL */ `
     minecraftVersion: String!
     modLoader: GameModLoader!
     modLoaderVersion: String
+    clientJavaMajorVersion: Int
     mainLogo: ContentMedia
     sidebarLogo: ContentMedia
     accentColor: String
@@ -445,6 +464,7 @@ export const serverTypeDefs = /* GraphQL */ `
     minecraftVersion: String!
     modLoader: GameModLoader!
     modLoaderVersion: String
+    clientJavaMajorVersion: Int
     neoForgeVersion: String
     notes: String
     cover: ContentMedia
@@ -459,6 +479,7 @@ export const serverTypeDefs = /* GraphQL */ `
     minecraftVersion: String!
     modLoader: GameModLoader!
     modLoaderVersion: String
+    clientJavaMajorVersion: Int
     mainLogo: ContentMedia
     sidebarLogo: ContentMedia
     accentColor: String
@@ -479,6 +500,8 @@ export const serverTypeDefs = /* GraphQL */ `
     mainLogoMediaId: ID
     sidebarLogoMediaId: ID
     accentColor: String
+    dockerImage: String
+    clientJavaMajorVersion: Int
   }
 
   """
@@ -621,6 +644,16 @@ export const serverTypeDefs = /* GraphQL */ `
     Retrieves registered HiKAT player candidates for whitelist selector - requires ADMIN role
     """
     hikatWhitelistCandidates: [HikatWhitelistCandidate!]!
+
+    """
+    Available Docker images for the Pterodactyl egg associated with a mod loader - requires ADMIN role
+    """
+    serverEggDockerImages(modLoader: GameModLoader!): [ServerEggDockerImage!]!
+
+    """
+    Compatible Java versions for the client for a specific Minecraft version - requires ADMIN role
+    """
+    clientCompatibleJavaVersions(minecraftVersion: String!): [ClientCompatibleJavaVersion!]!
   }
 
   """

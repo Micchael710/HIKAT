@@ -146,11 +146,23 @@ async function ensureJavaRuntime({ appDataRoot, majorVersion = 21, component, si
   if (component && platformTargets[component]) {
     targetList = platformTargets[component]
   } else {
-    targetList =
-      platformTargets["java-runtime-delta"] ||
-      platformTargets["java-runtime-gamma"] ||
-      platformTargets["java-runtime-alpha"] ||
-      platformTargets["jre-legacy"]
+    const majorToComponent = {
+      8: "jre-legacy",
+      16: "java-runtime-alpha",
+      17: "java-runtime-gamma",
+      21: "java-runtime-delta",
+      25: "java-runtime-epsilon",
+    }
+    const resolvedComp = majorToComponent[majorVersion]
+    if (resolvedComp && platformTargets[resolvedComp]) {
+      targetList = platformTargets[resolvedComp]
+    } else {
+      targetList =
+        platformTargets["java-runtime-delta"] ||
+        platformTargets["java-runtime-gamma"] ||
+        platformTargets["java-runtime-alpha"] ||
+        platformTargets["jre-legacy"]
+    }
   }
 
   const target = Array.isArray(targetList) ? targetList[0] : targetList

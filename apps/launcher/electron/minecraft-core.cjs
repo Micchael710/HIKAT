@@ -58,7 +58,7 @@ async function saveCoreState(instanceRoot, state) {
  * Accepts: { instanceRoot, minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion }
  * neoForgeVersion is legacy: if modLoader is not provided, NEOFORGE is assumed.
  */
-async function checkCore({ instanceRoot, minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion }) {
+async function checkCore({ instanceRoot, minecraftVersion, modLoader, modLoaderVersion, neoForgeVersion, clientJavaMajorVersion }) {
   if (!instanceRoot) return { installed: false }
   const cleanMc = String(minecraftVersion || "").trim()
 
@@ -75,6 +75,9 @@ async function checkCore({ instanceRoot, minecraftVersion, modLoader, modLoaderV
   if (state.minecraftVersion !== cleanMc) return { installed: false, resolvedVersionId: state.resolvedVersionId, javaMajorVersion: state.javaMajorVersion || 21, javaComponent: state.javaComponent || null }
   if (stateLoader !== resolvedLoader) return { installed: false, resolvedVersionId: state.resolvedVersionId, javaMajorVersion: state.javaMajorVersion || 21, javaComponent: state.javaComponent || null }
   if (resolvedLoader !== "VANILLA" && stateLoaderVersion !== resolvedLoaderVersion) {
+    return { installed: false, resolvedVersionId: state.resolvedVersionId, javaMajorVersion: state.javaMajorVersion || 21, javaComponent: state.javaComponent || null }
+  }
+  if (clientJavaMajorVersion && state.javaMajorVersion !== clientJavaMajorVersion) {
     return { installed: false, resolvedVersionId: state.resolvedVersionId, javaMajorVersion: state.javaMajorVersion || 21, javaComponent: state.javaComponent || null }
   }
 
@@ -140,6 +143,7 @@ async function installCore({
   modLoader,
   modLoaderVersion,
   neoForgeVersion,
+  clientJavaMajorVersion,
   javaPath,
   signal,
   onProgress,
@@ -190,8 +194,18 @@ async function installCore({
   const vanillaVersion = await Version.parse(folder, cleanMc)
 
   // 3.1 Dynamically resolve and ensure required Java runtime for this Minecraft version
-  const requiredJavaMajor = vanillaVersion.javaVersion?.majorVersion ?? 8
-  const requiredJavaComponent = vanillaVersion.javaVersion?.component ?? "jre-legacy"
+  const requiredJavaMajor = clientJavaMajorVersion || (vanillaVersion.javaVersion?.majorVersion ?? 8)
+  const majorToComponent = {
+    8: "jre-legacy",
+    16: "java-runtime-alpha",
+    17: "java-runtime-gamma",
+    21: "java-runtime-delta",
+    25: "java-runtime-epsilon",
+  }
+  const requiredJavaComponent =
+    majorToComponent[requiredJavaMajor] ||
+    vanillaVersion.javaVersion?.component ||
+    "jre-legacy"
 
   let effectiveJavaPath = javaPath
   if (!effectiveJavaPath) {

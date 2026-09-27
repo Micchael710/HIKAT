@@ -169,6 +169,7 @@ export const gameTypeDefs = /* GraphQL */ `
 
     modLoader: GameModLoader!
     modLoaderVersion: String
+    clientJavaMajorVersion: Int
 
     # Compatibilidad temporal con launchers anteriores
     neoForgeVersion: String!
@@ -213,6 +214,7 @@ export const gameTypeDefs = /* GraphQL */ `
     minecraftVersion: String!
     modLoader: GameModLoader!
     modLoaderVersion: String
+    clientJavaMajorVersion: Int
     neoForgeVersion: String
     status: GameReleaseStatus!
     notes: String

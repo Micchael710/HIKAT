@@ -9,6 +9,7 @@ import type {
   UpdateServerBrandingInputGql,
   GameModLoaderGql,
   ServerProvisioningStatusGql,
+  ServerEggDockerImageGql,
 } from "@hikat/graphql"
 import {
   validateWindowsFolderName,
@@ -59,6 +60,7 @@ export async function formatServerGql(
     minecraftVersion: server.minecraftVersion,
     modLoader: server.modLoader as GameModLoaderGql,
     modLoaderVersion: server.modLoaderVersion || null,
+    clientJavaMajorVersion: server.clientJavaMajorVersion ?? null,
     mainLogo,
     sidebarLogo,
     accentColor: server.accentColor || null,
@@ -114,6 +116,7 @@ export async function formatLauncherServerGql(
         minecraftVersion: rel.minecraftVersion,
         modLoader: (rel.modLoader || "NEOFORGE") as GameModLoaderGql,
         modLoaderVersion: rel.modLoaderVersion || null,
+        clientJavaMajorVersion: rel.clientJavaMajorVersion ?? server.clientJavaMajorVersion ?? null,
         neoForgeVersion: rel.neoForgeVersion || null,
         notes: rel.notes || null,
         cover,
@@ -127,6 +130,7 @@ export async function formatLauncherServerGql(
     minecraftVersion: server.minecraftVersion,
     modLoader: server.modLoader as GameModLoaderGql,
     modLoaderVersion: server.modLoaderVersion || null,
+    clientJavaMajorVersion: server.clientJavaMajorVersion ?? null,
     mainLogo,
     sidebarLogo,
     accentColor: server.accentColor || null,
@@ -383,6 +387,67 @@ export async function getServerById(
   return formatServerGql(server, db, env, request)
 }
 
+export async function getServerEggDockerImages(
+  modLoader: GameModLoaderGql,
+  env: Env,
+  clientOverride?: IPterodactylClient,
+): Promise<ServerEggDockerImageGql[]> {
+  let rawEggId: string | undefined
+  switch (modLoader) {
+    case "VANILLA":
+      rawEggId = env.PTERODACTYL_EGG_VANILLA_ID
+      break
+    case "FORGE":
+      rawEggId = env.PTERODACTYL_EGG_FORGE_ID
+      break
+    case "NEOFORGE":
+      rawEggId = env.PTERODACTYL_EGG_NEOFORGE_ID
+      break
+    case "FABRIC":
+      rawEggId = env.PTERODACTYL_EGG_FABRIC_ID
+      break
+    case "QUILT":
+      rawEggId = env.PTERODACTYL_EGG_QUILT_ID
+      break
+    default:
+      throw createGraphQLError(
+        `Mod loader no soportado: ${modLoader}`,
+        "VALIDATION_ERROR",
+      )
+  }
+
+  const eggId = Number(rawEggId)
+  if (!rawEggId || !Number.isInteger(eggId) || eggId <= 0) {
+    throw createGraphQLError(
+      `La configuración de aprovisionamiento de Pterodactyl para ${modLoader} está incompleta o es inválida (PTERODACTYL_EGG_${modLoader}_ID).`,
+      "VALIDATION_ERROR",
+    )
+  }
+
+  const nestId = Number(env.PTERODACTYL_DEFAULT_NEST_ID || "1")
+  const client = clientOverride || createPterodactylApplicationClient(env)
+  const egg = await client.getApplicationEgg(nestId, eggId)
+
+  const dockerImages = egg.attributes.docker_images
+  const defaultImage = egg.attributes.docker_image
+
+  if (dockerImages && typeof dockerImages === "object" && Object.keys(dockerImages).length > 0) {
+    return Object.entries(dockerImages).map(([name, image]) => ({
+      name,
+      image,
+      isDefault: image === defaultImage,
+    }))
+  }
+
+  return [
+    {
+      name: "Default",
+      image: defaultImage,
+      isDefault: true,
+    },
+  ]
+}
+
 export async function createServer(
   db: Database,
   env: Env,
@@ -501,6 +566,7 @@ export async function createServer(
     modLoaderVersion: string | null | undefined,
     javaMajor: number,
     env: Env,
+    overrideDockerImage?: string | null,
   ): LoaderProvisioningConfig {
     const mcVersion = minecraftVersion.trim()
     const loaderVersion = modLoaderVersion?.trim() || ""
@@ -581,6 +647,10 @@ export async function createServer(
         `La configuración de aprovisionamiento de Pterodactyl para ${modLoader} está incompleta o es inválida (PTERODACTYL_EGG_${modLoader}_ID).`,
         "VALIDATION_ERROR",
       )
+    }
+
+    if (overrideDockerImage && overrideDockerImage.trim()) {
+      dockerImage = overrideDockerImage.trim()
     }
 
     return {
@@ -689,6 +759,7 @@ export async function createServer(
     input.modLoaderVersion,
     javaMajor,
     env,
+    input.dockerImage,
   )
 
   const serverId = crypto.randomUUID()
@@ -701,6 +772,7 @@ export async function createServer(
     minecraftVersion: input.minecraftVersion.trim(),
     modLoader: input.modLoader,
     modLoaderVersion: input.modLoaderVersion?.trim() || null,
+    clientJavaMajorVersion: input.clientJavaMajorVersion ?? null,
     mainLogoMediaId: input.mainLogoMediaId || null,
     sidebarLogoMediaId: input.sidebarLogoMediaId || null,
     accentColor: normalizedColor,

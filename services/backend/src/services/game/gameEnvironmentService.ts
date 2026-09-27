@@ -497,6 +497,45 @@ export async function validateGameEnvironment(
     }
 }
 
+export interface ClientCompatibleJavaVersionItem {
+    majorVersion: number
+    name: string
+    isRecommended: boolean
+}
+
+export async function getClientCompatibleJavaVersions(
+    minecraftVersion: string,
+): Promise<ClientCompatibleJavaVersionItem[]> {
+    const baseMajor = await getMinecraftJavaMajorVersion(minecraftVersion)
+
+    if (baseMajor <= 8) {
+        return [
+            { majorVersion: 8, name: "Java 8", isRecommended: true },
+        ]
+    }
+
+    if (baseMajor === 16) {
+        return [
+            { majorVersion: 16, name: "Java 16", isRecommended: true },
+            { majorVersion: 17, name: "Java 17", isRecommended: false },
+        ]
+    }
+
+    if (baseMajor === 17) {
+        return [
+            { majorVersion: 17, name: "Java 17", isRecommended: true },
+            { majorVersion: 21, name: "Java 21", isRecommended: false },
+            { majorVersion: 25, name: "Java 25", isRecommended: false },
+        ]
+    }
+
+    // baseMajor >= 21
+    return [
+        { majorVersion: 21, name: "Java 21", isRecommended: true },
+        { majorVersion: 25, name: "Java 25", isRecommended: false },
+    ]
+}
+
 // ─── Legacy exports for backwards-compat ─────────────────────────────────────
 
 /** @deprecated Use getLoaderVersions with modLoader=NEOFORGE */

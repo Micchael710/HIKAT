@@ -311,12 +311,25 @@ export interface UpdateNewsInputGql {
   status?: NewsStatus | null
 }
 
+export interface ServerEggDockerImageGql {
+  name: string
+  image: string
+  isDefault: boolean
+}
+
+export interface ClientCompatibleJavaVersionGql {
+  majorVersion: number
+  name: string
+  isRecommended: boolean
+}
+
 export interface ServerGql {
   id: string
   name: string
   minecraftVersion: string
   modLoader: GameModLoaderGql
   modLoaderVersion?: string | null
+  clientJavaMajorVersion?: number | null
   mainLogo?: ContentMediaGql | null
   sidebarLogo?: ContentMediaGql | null
   accentColor?: string | null
@@ -334,6 +347,7 @@ export interface LauncherReleaseSummaryGql {
   minecraftVersion: string
   modLoader: GameModLoaderGql
   modLoaderVersion?: string | null
+  clientJavaMajorVersion?: number | null
   neoForgeVersion?: string | null
   notes?: string | null
   cover?: ContentMediaGql | null
@@ -345,6 +359,7 @@ export interface LauncherServerGql {
   minecraftVersion: string
   modLoader: GameModLoaderGql
   modLoaderVersion?: string | null
+  clientJavaMajorVersion?: number | null
   mainLogo?: ContentMediaGql | null
   sidebarLogo?: ContentMediaGql | null
   accentColor?: string | null
@@ -371,6 +386,8 @@ export interface CreateServerInputGql {
   mainLogoMediaId?: string | null
   sidebarLogoMediaId?: string | null
   accentColor?: string | null
+  dockerImage?: string | null
+  clientJavaMajorVersion?: number | null
 }
 
 export interface UpdateServerBrandingInputGql {
@@ -706,6 +723,7 @@ export interface PublishedModpackGql {
   minecraftVersion: string
   modLoader: GameModLoaderGql
   modLoaderVersion?: string | null
+  clientJavaMajorVersion?: number | null
   /** @deprecated Use modLoader + modLoaderVersion */
   neoForgeVersion?: string | null
   mandatory: boolean
@@ -742,6 +760,7 @@ export interface GameReleaseGql {
   minecraftVersion: string
   modLoader: GameModLoaderGql
   modLoaderVersion?: string | null
+  clientJavaMajorVersion?: number | null
   /** @deprecated Use modLoader + modLoaderVersion */
   neoForgeVersion?: string | null
   status: GameReleaseStatusGql

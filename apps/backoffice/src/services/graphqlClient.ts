@@ -18,6 +18,9 @@ import type {
   ServerFileItem,
   ServerFileContent,
   ServerNodeCapacity,
+  ServerEggDockerImage,
+  ClientCompatibleJavaVersion,
+  GameModLoader,
 } from "../types"
 
 import type { NewsType, NewsStatus } from "@hikat/shared"
@@ -435,6 +438,7 @@ const SERVER_FIELDS = `
   minecraftVersion
   modLoader
   modLoaderVersion
+  clientJavaMajorVersion
   mainLogo {
     id
     mediaType
@@ -544,6 +548,34 @@ export const serverApi = {
     `
     const data = await executeGraphQL<{ serverNodeCapacity: ServerNodeCapacity }>(query)
     return data.serverNodeCapacity
+  },
+
+  async getServerEggDockerImages(modLoader: GameModLoader): Promise<ServerEggDockerImage[]> {
+    const query = /* GraphQL */ `
+      query ServerEggDockerImages($modLoader: GameModLoader!) {
+        serverEggDockerImages(modLoader: $modLoader) {
+          name
+          image
+          isDefault
+        }
+      }
+    `
+    const data = await executeGraphQL<{ serverEggDockerImages: ServerEggDockerImage[] }>(query, { modLoader })
+    return data.serverEggDockerImages || []
+  },
+
+  async getClientCompatibleJavaVersions(minecraftVersion: string): Promise<ClientCompatibleJavaVersion[]> {
+    const query = /* GraphQL */ `
+      query ClientCompatibleJavaVersions($minecraftVersion: String!) {
+        clientCompatibleJavaVersions(minecraftVersion: $minecraftVersion) {
+          majorVersion
+          name
+          isRecommended
+        }
+      }
+    `
+    const data = await executeGraphQL<{ clientCompatibleJavaVersions: ClientCompatibleJavaVersion[] }>(query, { minecraftVersion })
+    return data.clientCompatibleJavaVersions || []
   },
 
   async getServerStatus(serverId: string): Promise<ServerResources> {

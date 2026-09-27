@@ -23,6 +23,7 @@ export interface ServerItem {
   minecraftVersion: string
   modLoader: GameModLoader
   modLoaderVersion?: string | null
+  clientJavaMajorVersion?: number | null
   mainLogo?: ContentMedia | null
   sidebarLogo?: ContentMedia | null
   accentColor?: string | null
@@ -35,11 +36,25 @@ export interface ServerItem {
   updatedAt: string
 }
 
+export interface ServerEggDockerImage {
+  name: string
+  image: string
+  isDefault: boolean
+}
+
+export interface ClientCompatibleJavaVersion {
+  majorVersion: number
+  name: string
+  isRecommended: boolean
+}
+
 export interface CreateServerInput {
   name: string
   minecraftVersion: string
   modLoader: GameModLoader
   modLoaderVersion?: string | null
+  dockerImage?: string | null
+  clientJavaMajorVersion?: number | null
   cpu: number
   memoryMb: number
   diskMb: number

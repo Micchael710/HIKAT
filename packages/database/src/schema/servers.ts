@@ -31,6 +31,7 @@ export const servers = sqliteTable(
     pterodactylServerId: text("pterodactyl_server_id"),
     pterodactylIdentifier: text("pterodactyl_identifier"),
     launcherActiveReleaseId: text("launcher_active_release_id"),
+    clientJavaMajorVersion: integer("client_java_major_version"),
     createdAt: text("created_at")
       .notNull()
       .$defaultFn(() => new Date().toISOString()),

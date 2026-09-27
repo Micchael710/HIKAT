@@ -168,6 +168,7 @@ class GameOperationManager {
       modLoader,
       modLoaderVersion,
       neoForgeVersion,
+      clientJavaMajorVersion: payload.clientJavaMajorVersion,
     })
 
     const javaMajor = core.javaMajorVersion || 21
@@ -461,6 +462,7 @@ class GameOperationManager {
               modLoader,
               modLoaderVersion,
               neoForgeVersion,
+              clientJavaMajorVersion: payload.clientJavaMajorVersion,
               signal: abortController.signal,
               onProgress: coreProgressAdapter,
             })

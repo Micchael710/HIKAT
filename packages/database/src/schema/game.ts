@@ -34,6 +34,7 @@ export const gameReleases = sqliteTable(
     neoForgeVersion: text("neoforge_version")
       .notNull()
       .default("21.1.65"),
+    clientJavaMajorVersion: integer("client_java_major_version"),
     status: text("status").notNull().default("DRAFT"),
     notes: text("notes"),
     coverMediaId: text("cover_media_id").references(() => contentMedia.id, {

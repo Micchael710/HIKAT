@@ -128,6 +128,84 @@ describe("HiKAT Modern Minecraft & NeoForge Adapter Suite (XMCL 6.3.2)", () => {
     expect(result.resolvedVersionId).toBe(profileId)
   })
 
+  it("3b. checkCore returns installed: false if clientJavaMajorVersion does not match state.javaMajorVersion", async () => {
+    const mcVersion = "1.21.1"
+    const neoForgeVersion = "21.1.65"
+    const profileId = `${mcVersion}-neoforge-${neoForgeVersion}`
+
+    const versionDir = path.join(instanceRoot, "versions", profileId)
+    await fsp.mkdir(versionDir, { recursive: true })
+    await fsp.writeFile(
+      path.join(versionDir, `${profileId}.json`),
+      JSON.stringify({
+        id: profileId,
+        mainClass: "net.neoforged.neoforge.client.ClientModLoader",
+        libraries: [],
+        downloads: {},
+      }),
+      "utf8"
+    )
+
+    await saveCoreState(instanceRoot, {
+      schemaVersion: 2,
+      minecraftVersion: mcVersion,
+      modLoader: "NEOFORGE",
+      modLoaderVersion: neoForgeVersion,
+      javaMajorVersion: 21,
+      resolvedVersionId: profileId,
+    })
+
+    // Expecting Java 25 but installed with Java 21 -> requires re-check / install
+    const result = await checkCore({
+      instanceRoot,
+      minecraftVersion: mcVersion,
+      modLoader: "NEOFORGE",
+      modLoaderVersion: neoForgeVersion,
+      clientJavaMajorVersion: 25,
+    })
+
+    expect(result.installed).toBe(false)
+  })
+
+  it("3c. checkCore returns installed: true when clientJavaMajorVersion matches state.javaMajorVersion", async () => {
+    const mcVersion = "1.21.1"
+    const neoForgeVersion = "21.1.65"
+    const profileId = `${mcVersion}-neoforge-${neoForgeVersion}`
+
+    const versionDir = path.join(instanceRoot, "versions", profileId)
+    await fsp.mkdir(versionDir, { recursive: true })
+    await fsp.writeFile(
+      path.join(versionDir, `${profileId}.json`),
+      JSON.stringify({
+        id: profileId,
+        mainClass: "net.neoforged.neoforge.client.ClientModLoader",
+        libraries: [],
+        downloads: {},
+      }),
+      "utf8"
+    )
+
+    await saveCoreState(instanceRoot, {
+      schemaVersion: 2,
+      minecraftVersion: mcVersion,
+      modLoader: "NEOFORGE",
+      modLoaderVersion: neoForgeVersion,
+      javaMajorVersion: 25,
+      resolvedVersionId: profileId,
+    })
+
+    const result = await checkCore({
+      instanceRoot,
+      minecraftVersion: mcVersion,
+      modLoader: "NEOFORGE",
+      modLoaderVersion: neoForgeVersion,
+      clientJavaMajorVersion: 25,
+    })
+
+    expect(result.installed).toBe(true)
+    expect(result.javaMajorVersion).toBe(25)
+  })
+
   it("4. Missing or corrupted profile returns installed: false", async () => {
     const mcVersion = "1.21.1"
     const neoForgeVersion = "21.1.65"

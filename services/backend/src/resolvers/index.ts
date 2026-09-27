@@ -108,6 +108,8 @@ import type {
   HikatWhitelistCandidateGql,
   LauncherReleaseGql,
   LauncherUploadTicketPayloadGql,
+  ServerEggDockerImageGql,
+  ClientCompatibleJavaVersionGql,
 } from "@hikat/graphql"
 
 import {
@@ -137,6 +139,7 @@ import {
   updateServerBranding,
   deleteServer,
   getServerNodeCapacity,
+  getServerEggDockerImages,
 } from "../services/serverService"
 import { notifyDurableObjectWatchServers } from "../releaseEvents"
 import {
@@ -284,6 +287,7 @@ import { broadcastCosmeticsUpdated } from "../releaseEvents"
 import {
   getGameEnvironmentCatalog,
   getLoaderVersions,
+  getClientCompatibleJavaVersions,
 } from "../services/game/gameEnvironmentService"
 
 import {
@@ -1004,6 +1008,24 @@ export const resolvers = {
     ) => {
       requireAdmin(context)
       return getLoaderVersions(args.minecraftVersion, args.modLoader as any)
+    },
+
+    serverEggDockerImages: async (
+      _parent: unknown,
+      args: { modLoader: GameModLoaderGql },
+      context: BackendGraphQLContext,
+    ): Promise<ServerEggDockerImageGql[]> => {
+      requireAdmin(context)
+      return getServerEggDockerImages(args.modLoader, context.env)
+    },
+
+    clientCompatibleJavaVersions: async (
+      _parent: unknown,
+      args: { minecraftVersion: string },
+      context: BackendGraphQLContext,
+    ): Promise<ClientCompatibleJavaVersionGql[]> => {
+      requireAdmin(context)
+      return getClientCompatibleJavaVersions(args.minecraftVersion)
     },
 
     searchMods: async (

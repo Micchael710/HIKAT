@@ -259,6 +259,23 @@ export interface IPterodactylClient {
   listApplicationNodes(): Promise<PterodactylNodeListResponse>
   getApplicationNode(nodeId: number | string): Promise<PterodactylNodeResponse>
   listApplicationNodeAllocations(nodeId: number | string): Promise<PterodactylAllocationListResponse>
+  getApplicationEgg(nestId: number | string, eggId: number | string): Promise<PterodactylEggResponse>
+}
+
+export interface PterodactylEggAttributes {
+  id: number
+  uuid: string
+  name: string
+  nest: number
+  author: string
+  description: string | null
+  docker_image: string
+  docker_images: Record<string, string>
+}
+
+export interface PterodactylEggResponse {
+  object: "egg"
+  attributes: PterodactylEggAttributes
 }
 
 export interface PterodactylAllocationAttributes {

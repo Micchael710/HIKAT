@@ -915,5 +915,15 @@ export class PterodactylHttpClient implements IPterodactylClient {
       { method: "GET" },
     )
   }
+
+  async getApplicationEgg(
+    nestId: number | string,
+    eggId: number | string,
+  ): Promise<import("./types").PterodactylEggResponse> {
+    return this.applicationRequest<import("./types").PterodactylEggResponse>(
+      `/api/application/nests/${encodeURIComponent(String(nestId))}/eggs/${encodeURIComponent(String(eggId))}`,
+      { method: "GET" },
+    )
+  }
 }
 

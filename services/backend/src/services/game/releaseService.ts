@@ -164,6 +164,7 @@ export function formatGameRelease(
     minecraftVersion: release.minecraftVersion,
     modLoader: (release.modLoader || "NEOFORGE") as GameModLoaderGql,
     modLoaderVersion: release.modLoaderVersion || null,
+    clientJavaMajorVersion: release.clientJavaMajorVersion ?? null,
     neoForgeVersion: release.neoForgeVersion || null,
     status: release.status as any,
     notes: release.notes || null,
@@ -573,12 +574,25 @@ export async function getPublishedModpack(
     }
   }
 
+  let clientJavaMajorVersion: number | null = activeRelease.clientJavaMajorVersion ?? null
+  if (!clientJavaMajorVersion && activeRelease.serverId) {
+    const srv = await db
+      .select({ clientJavaMajorVersion: schema.servers.clientJavaMajorVersion })
+      .from(schema.servers)
+      .where(eq(schema.servers.id, activeRelease.serverId))
+      .get()
+    if (srv?.clientJavaMajorVersion) {
+      clientJavaMajorVersion = srv.clientJavaMajorVersion
+    }
+  }
+
   return {
     releaseId: activeRelease.id,
     version: activeRelease.version,
     minecraftVersion: activeRelease.minecraftVersion,
     modLoader: (activeRelease.modLoader || "NEOFORGE") as GameModLoaderGql,
     modLoaderVersion: activeRelease.modLoaderVersion || null,
+    clientJavaMajorVersion,
     neoForgeVersion: activeRelease.neoForgeVersion || null,
     mandatory: true,
     clientFiles,
@@ -768,9 +782,10 @@ export async function prepareGameDraft(
   let defaultMcVersion = "1.21.1"
   let defaultLoader: GameModLoaderGql = "NEOFORGE"
   let defaultLoaderVersion: string | null = "21.1.65"
+  let serverRow: schema.Server | undefined
 
   if (serverId) {
-    const serverRow = await db
+    serverRow = await db
       .select()
       .from(schema.servers)
       .where(eq(schema.servers.id, serverId))
@@ -794,6 +809,10 @@ export async function prepareGameDraft(
         (inheritedModLoader === "NEOFORGE" ? baseRelease?.neoForgeVersion || defaultLoaderVersion : defaultLoaderVersion)
 
   const effectiveServerId = serverId || baseRelease?.serverId || null
+  const inheritedClientJavaMajorVersion =
+    baseRelease?.clientJavaMajorVersion ??
+    serverRow?.clientJavaMajorVersion ??
+    null
 
   await db.insert(schema.gameReleases).values({
     id: draftId,
@@ -802,6 +821,7 @@ export async function prepareGameDraft(
     minecraftVersion: baseRelease?.minecraftVersion || defaultMcVersion,
     modLoader: inheritedModLoader,
     modLoaderVersion: inheritedModLoaderVersion,
+    clientJavaMajorVersion: inheritedClientJavaMajorVersion,
     neoForgeVersion: baseRelease?.neoForgeVersion || (inheritedModLoader === "NEOFORGE" ? inheritedModLoaderVersion : null) || "21.1.65",
     status: "DRAFT",
     notes: baseRelease?.notes || null,

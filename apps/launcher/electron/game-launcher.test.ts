@@ -137,4 +137,71 @@ describe("GameLauncher & computeHiKatPlayerUuid Identity Suite", () => {
       expect(mockXmcl).not.toHaveBeenCalled()
     }
   })
+
+  it("5. Includes --enable-native-access=ALL-UNNAMED when javaMajorVersion >= 24 (e.g. Java 25)", async () => {
+    const mockChildProcess = new EventEmitter() as any
+    mockChildProcess.pid = 11224
+    mockChildProcess.unref = vi.fn()
+
+    const mockXmcl = vi.fn().mockResolvedValue(mockChildProcess)
+
+    const launcher = new GameLauncher(null, {
+      instanceRoot,
+      xmclLauncher: mockXmcl,
+      versionParser: vi.fn().mockResolvedValue({ id: "1.21.1" }),
+      readinessChecker: vi.fn().mockResolvedValue({
+        installed: true,
+        resolvedVersionId: "1.21.1",
+        javaMajorVersion: 25,
+      }),
+      javaResolver: vi.fn().mockReturnValue({ javaPath: "/mock/javaw.exe" }),
+      javaValidator: vi.fn().mockReturnValue({ valid: true, majorVersion: 25 }),
+      processChecker: () => true,
+    })
+
+    const result = await launcher.launch({
+      playerName: "vBrayan06",
+      playerId: "user-123",
+      minecraftVersion: "1.21.1",
+      modLoader: "VANILLA",
+    })
+
+    expect(result.success).toBe(true)
+    const passedOptions = mockXmcl.mock.calls[0][0]
+    expect(passedOptions.extraJVMArgs).toContain("--enable-native-access=ALL-UNNAMED")
+  })
+
+  it("6. Does NOT include --enable-native-access=ALL-UNNAMED when javaMajorVersion < 24 (e.g. Java 21)", async () => {
+    const mockChildProcess = new EventEmitter() as any
+    mockChildProcess.pid = 11225
+    mockChildProcess.unref = vi.fn()
+
+    const mockXmcl = vi.fn().mockResolvedValue(mockChildProcess)
+
+    const launcher = new GameLauncher(null, {
+      instanceRoot,
+      xmclLauncher: mockXmcl,
+      versionParser: vi.fn().mockResolvedValue({ id: "1.21.1" }),
+      readinessChecker: vi.fn().mockResolvedValue({
+        installed: true,
+        resolvedVersionId: "1.21.1",
+        javaMajorVersion: 21,
+      }),
+      javaResolver: vi.fn().mockReturnValue({ javaPath: "/mock/javaw.exe" }),
+      javaValidator: vi.fn().mockReturnValue({ valid: true, majorVersion: 21 }),
+      processChecker: () => true,
+    })
+
+    const result = await launcher.launch({
+      playerName: "vBrayan06",
+      playerId: "user-123",
+      minecraftVersion: "1.21.1",
+      modLoader: "VANILLA",
+    })
+
+    expect(result.success).toBe(true)
+    const passedOptions = mockXmcl.mock.calls[0][0]
+    expect(passedOptions.extraJVMArgs).not.toContain("--enable-native-access=ALL-UNNAMED")
+  })
 })
+
